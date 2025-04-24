@@ -22,7 +22,7 @@ def test_dir(tmp_path):
 @pytest.fixture
 def real_data_dir():
     # Path to the real data directory
-    return os.path.join(os.path.dirname(__file__), "../datasets/names")
+    return os.path.join(os.path.dirname(__file__), "../../../datasets/names")
 
 
 def test_dataset_initialization(test_dir):

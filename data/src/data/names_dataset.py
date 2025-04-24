@@ -1,5 +1,6 @@
 import glob
 import logging
+import os
 from collections import namedtuple
 
 from torch.utils.data import Dataset
@@ -21,7 +22,13 @@ class NamesDataset(Dataset):
             data_folder: Path to the folder containing text files, where each file represents a country and contains names.
             max_countries_count: Maximum number of countries to load. If None, all countries are loaded.
             max_names_count: Maximum number of names to load. If None, all names are loaded.
+
+        Raises:
+            FileNotFoundError: If the data_folder does not exist.
         """
+        if not os.path.exists(data_folder):
+            raise FileNotFoundError(f"{data_folder=} does not exist.")
+
         self.max_countries_count = max_countries_count
         self.max_names_count = max_names_count
         self.names, self.countries = self.load(data_folder)
