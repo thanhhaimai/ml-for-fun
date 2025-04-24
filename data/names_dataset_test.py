@@ -26,9 +26,7 @@ def real_data_dir():
 
 
 def test_dataset_initialization(test_dir):
-    dataset = NamesDataset(
-        data_folder=test_dir, max_countries_count=10, max_names_count=10
-    )
+    dataset = NamesDataset(data_folder=test_dir)
     assert len(dataset) == 4  # 2 names per country, 2 countries
     assert dataset.countries == ["English", "French"]
     assert dataset.names == [
@@ -39,10 +37,8 @@ def test_dataset_initialization(test_dir):
     ]
 
 
-def test_get_item(test_dir):
-    dataset = NamesDataset(
-        data_folder=test_dir, max_countries_count=2, max_names_count=2
-    )
+def test_get_item_max_countries_count(test_dir):
+    dataset = NamesDataset(data_folder=test_dir, max_countries_count=1)
     name, country = dataset[0]
     assert name == "John"
     assert country == "English"
@@ -55,10 +51,18 @@ def test_get_item(test_dir):
         dataset[2]
 
 
+def test_get_item_max_names_count(test_dir):
+    dataset = NamesDataset(data_folder=test_dir, max_names_count=1)
+    name, country = dataset[0]
+    assert name == "John"
+    assert country == "English"
+
+    with pytest.raises(IndexError):
+        dataset[1]
+
+
 def test_index_out_of_range(test_dir):
-    dataset = NamesDataset(
-        data_folder=test_dir, max_countries_count=2, max_names_count=10
-    )
+    dataset = NamesDataset(data_folder=test_dir)
     with pytest.raises(IndexError):
         dataset[10]
 
@@ -68,7 +72,7 @@ def test_real_data_initialization(real_data_dir):
         data_folder=real_data_dir, max_countries_count=5, max_names_count=10
     )
     print(dataset.names)
-    assert len(dataset) == 10  # We have enough real data for 50 names
+    assert len(dataset) == 10  # We have enough real data for 10 names
     assert len(dataset.countries) == 1  # The first country already exhausts 10 names
 
 
@@ -80,12 +84,3 @@ def test_real_data_get_item(real_data_dir):
     assert isinstance(name, str)  # Ensure name is a string
     assert isinstance(country, str)  # Ensure country is a string
     assert country in dataset.countries  # Ensure country is valid
-
-
-def test_real_data_max_names_per_country(real_data_dir):
-    dataset = NamesDataset(
-        data_folder=real_data_dir, max_countries_count=5, max_names_count=3
-    )
-    for country in dataset.countries:
-        country_names = [name for name, c in dataset if c == country]
-        assert len(country_names) <= 3  # Ensure max_names_count is respected

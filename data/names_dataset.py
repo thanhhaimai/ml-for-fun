@@ -11,21 +11,16 @@ class NamesDataset(Dataset):
     def __init__(
         self,
         data_folder: str,
-        max_countries_count: int,
-        max_names_count: int,
+        max_countries_count: int | None = None,
+        max_names_count: int | None = None,
     ):
         """
-        Initializes the NamesDataset with a list of names from text files.
+        Initializes the NamesDataset by loading names and their associated countries from text files.
 
         Args:
-            data_folder (str): The path to the folder containing the names files.
-              Each file represents a country and contains one name per line.
-            max_countries_count (int): The maximum number of countries to load.
-            max_names_count (int): The maximum number of names to load.
-
-        The files within `data_folder` should follow this format:
-        - Each file is named after a country (e.g., `English.txt`).
-        - Each line in the file contains a single name.
+            data_folder: Path to the folder containing text files, where each file represents a country and contains names.
+            max_countries_count: Maximum number of countries to load. If None, all countries are loaded.
+            max_names_count: Maximum number of names to load. If None, all names are loaded.
         """
         self.max_countries_count = max_countries_count
         self.max_names_count = max_names_count
@@ -35,26 +30,23 @@ class NamesDataset(Dataset):
 
     def load(self, data_folder: str) -> tuple[list[NameLabel], list[str]]:
         """
-        Loads names and their corresponding countries from the specified folder.
+        Reads and processes names and their corresponding countries from the specified folder in sorted order.
 
         Args:
-            data_folder (str): The path to the folder containing the names files.
-            Each file represents a country and contains one name per line.
+            data_folder: Path to the folder containing text files, where each file represents a country and contains names.
 
         Returns:
-            tuple[list[NameLabel], list[str]]: A tuple containing a list of NameLabel objects (name and country index)
-            and a list of country names.
-
-        Notes:
-            - Files are processed in sorted order by filename.
-            - Stops loading if the maximum number of countries or names is reached.
+            A list of NameLabel objects (name and country index) and a list of country names.
         """
         names: list[NameLabel] = []
         countries: list[str] = []
 
         all_files = sorted(glob.glob(f"{data_folder}/*.txt"))
         for file_path in all_files:
-            if len(countries) > self.max_countries_count:
+            if (
+                self.max_countries_count is not None
+                and len(countries) >= self.max_countries_count
+            ):
                 logging.info(
                     f"Maximum number of countries {self.max_countries_count} reached. Skipping further countries."
                 )
@@ -67,7 +59,10 @@ class NamesDataset(Dataset):
             country_idx = len(countries) - 1
             with open(file_path, "r") as file:
                 for line in file:
-                    if len(names) >= self.max_names_count:
+                    if (
+                        self.max_names_count is not None
+                        and len(names) >= self.max_names_count
+                    ):
                         logging.info(
                             f"Maximum number of names {self.max_names_count} reached. Skipping further names."
                         )
@@ -81,25 +76,22 @@ class NamesDataset(Dataset):
 
     def __len__(self):
         """
-        Returns the number of names in the dataset.
-
-        Returns:
-            int: The total number of names loaded into the dataset.
+        Returns the total number of names in the dataset.
         """
         return len(self.names)
 
     def __getitem__(self, idx) -> tuple[str, str]:
         """
-        Retrieves the name and corresponding country for a given index.
+        Retrieves the name and its associated country for a given index.
 
         Args:
-            idx (int): The index of the name to retrieve.
+            idx (int): Index of the name to retrieve.
 
         Returns:
-            tuple[str, str]: A tuple containing the name and the country name.
+            The name and the corresponding country name.
 
         Raises:
-            IndexError: If the provided index is out of range.
+            IndexError: If the index is out of range.
         """
         if idx < 0 or idx >= len(self.names):
             raise IndexError(f"{idx=} out of range")
