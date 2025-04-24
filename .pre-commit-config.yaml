@@ -1,0 +1,55 @@
+default_install_hook_types:
+  - pre-commit
+  - pre-push
+  - post-checkout
+  - post-merge
+  - post-rewrite
+
+# The hooks below are organized by stages, and then by run order.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    # Ruff version.
+    rev: v0.11.6
+    hooks:
+      # Hook: Run lint with fix
+      - id: ruff
+        args: [--fix]
+        types_or: [python, pyi]
+
+      # Hook: Run the formatter after fix
+      - id: ruff-format
+        types_or: [python, pyi]
+
+  - repo: local
+    hooks:
+      # Hook: run `pytest` on changed files before commit
+      - id: pytest-only-changed
+        name: pytest-only-changed
+        description: "Run only the necessary tests before commit"
+        entry: uv run pytest --testmon
+        types_or: [python, pyi]
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      # Hook: run `pytest` on all tests before push
+      - id: pytest-all
+        name: pytest-all
+        description: "Run all tests before push"
+        entry: uv run pytest
+        types_or: [python, pyi]
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # Hook: run `uv sync` on checkout/rebase
+      - id: uv-sync
+        name: uv-sync
+        description: "Automatically run 'uv sync' on all projects after a checkout, pull or rebase"
+        entry: uv sync --locked --all-packages
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [post-checkout, post-merge, post-rewrite]
