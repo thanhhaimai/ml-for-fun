@@ -8,8 +8,6 @@ A template repo with most common python tooling setup (uv, pre-commit, ruff, pyt
 
 - [ ] Run `setup/setup.sh` for one time setup. The script is idempotent, so it's okay to re-run if the setup changes.
 
-## Keep up to date
+## Acknowledgments
 
-Ruff
-
-- Check and update `rev` field in `.pre-commit-config.yaml` to the desired version
+Dataset is from https://github.com/stefan-it/nmt-en-vi
