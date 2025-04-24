@@ -84,3 +84,8 @@ def test_real_data_get_item(real_data_dir):
     assert isinstance(name, str)  # Ensure name is a string
     assert isinstance(country, str)  # Ensure country is a string
     assert country in dataset.countries  # Ensure country is valid
+
+
+def test_non_existent_folder():
+    with pytest.raises(FileNotFoundError):
+        NamesDataset(data_folder="/non/existent/folder")
