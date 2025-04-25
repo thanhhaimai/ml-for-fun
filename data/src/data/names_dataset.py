@@ -18,7 +18,6 @@ class NamesDataset(Dataset):
         max_countries_count: int | None = None,
         max_names_count: int | None = None,
         transform_input: Callable[[str], str] | None = None,
-        device: torch.device = torch.device("cpu"),
     ):
         """
         Initializes the NamesDataset by loading names and their associated countries from text files.
@@ -28,7 +27,6 @@ class NamesDataset(Dataset):
             max_countries_count: Maximum number of countries to load. If None, all countries are loaded.
             max_names_count: Maximum number of names to load. If None, all names are loaded.
             transform_input: Function to transform names read from the file.
-            device: The device to which tensors will be moved (e.g., 'cpu' or 'cuda').
 
         Raises:
             FileNotFoundError: If the data_folder does not exist.
@@ -39,7 +37,6 @@ class NamesDataset(Dataset):
         self.max_countries_count = max_countries_count
         self.max_names_count = max_names_count
         self.transform_input = transform_input
-        self.device = device
 
         self.names, self.countries, tokens = self.load(data_folder)
         logging.info(f"Total countries loaded: {len(self.countries)}")
@@ -52,18 +49,8 @@ class NamesDataset(Dataset):
         self.names_tensors = []
         self.countries_tensors = []
         for name, country_idx in self.names:
-            self.names_tensors.append(
-                self.name_to_tensor(name).to(
-                    self.device,
-                    non_blocking=True,
-                )
-            )
-            self.countries_tensors.append(
-                self.country_index_to_tensor(country_idx).to(
-                    self.device,
-                    non_blocking=True,
-                )
-            )
+            self.names_tensors.append(self.name_to_tensor(name))
+            self.countries_tensors.append(self.country_index_to_tensor(country_idx))
 
     def __len__(self):
         return len(self.names)
@@ -123,6 +110,19 @@ class NamesDataset(Dataset):
                         names.append(NameLabel(name=name, country_idx=country_idx))
 
         return names, countries, list(tokens)
+
+    def to(self, device):
+        """
+        Moves the dataset tensors to the specified device.
+        """
+        self.names_tensors = [
+            name_tensor.to(device, non_blocking=True)
+            for name_tensor in self.names_tensors
+        ]
+        self.countries_tensors = [
+            country_tensor.to(device, non_blocking=True)
+            for country_tensor in self.countries_tensors
+        ]
 
     def name_to_tensor(self, name: str) -> torch.Tensor:
         # shape [1, sequence_length, num_classes]
