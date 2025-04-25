@@ -3,25 +3,21 @@ import logging
 import os
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Generic, TypeVar
 
+import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 NameLabel = namedtuple("NameLabel", ["name", "country_idx"])
 
-OutputType = TypeVar("OutputType")
-LabelType = TypeVar("LabelType")
 
-
-class NamesDataset(Dataset, Generic[OutputType, LabelType]):
+class NamesDataset(Dataset):
     def __init__(
         self,
         data_folder: str,
         max_countries_count: int | None = None,
         max_names_count: int | None = None,
         transform_input: Callable[[str], str] | None = None,
-        transform_output: Callable[[str], OutputType] | None = None,
-        transform_label: Callable[[str], LabelType] | None = None,
     ):
         """
         Initializes the NamesDataset by loading names and their associated countries from text files.
@@ -31,8 +27,6 @@ class NamesDataset(Dataset, Generic[OutputType, LabelType]):
             max_countries_count: Maximum number of countries to load. If None, all countries are loaded.
             max_names_count: Maximum number of names to load. If None, all names are loaded.
             transform_input: Function to transform names read from the file.
-            transform_output: Function to transform the returned name item.
-            transform_label: Function to transform the returned country item.
 
         Raises:
             FileNotFoundError: If the data_folder does not exist.
@@ -43,13 +37,31 @@ class NamesDataset(Dataset, Generic[OutputType, LabelType]):
         self.max_countries_count = max_countries_count
         self.max_names_count = max_names_count
         self.transform_input = transform_input
-        self.transform_output = transform_output
-        self.transform_label = transform_label
-        self.names, self.countries = self.load(data_folder)
 
+        self.names, self.countries, tokens = self.load(data_folder)
+        logging.info(f"Total countries loaded: {len(self.countries)}")
         logging.info(f"Total names loaded: {len(self.names)}")
+        logging.info(f"Total unique tokens loaded: {len(tokens)}")
 
-    def load(self, data_folder: str) -> tuple[list[NameLabel], list[str]]:
+        self.index_to_token = tokens
+        self.token_to_index = {c: i for i, c in enumerate(tokens)}
+
+        self.names_tensors = []
+        self.countries_tensors = []
+        for name, country_idx in self.names:
+            self.names_tensors.append(self.name_to_tensor(name))
+            self.countries_tensors.append(self.country_index_to_tensor(country_idx))
+
+    def __len__(self):
+        return len(self.names)
+
+    def __getitem__(self, idx) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Returns the name and country tensors for the given index.
+        """
+        return self.names_tensors[idx], self.countries_tensors[idx]
+
+    def load(self, data_folder: str) -> tuple[list[NameLabel], list[str], list[str]]:
         """
         Reads and processes names and their corresponding countries from the specified folder in sorted order.
 
@@ -57,10 +69,11 @@ class NamesDataset(Dataset, Generic[OutputType, LabelType]):
             data_folder: Path to the folder containing text files, where each file represents a country and contains names.
 
         Returns:
-            A list of NameLabel objects (name and country index) and a list of country names.
+            A list of NameLabel objects (name and country index), a list of country names, and a list of unique tokens.
         """
         names: list[NameLabel] = []
         countries: list[str] = []
+        tokens = set()
 
         all_files = sorted(glob.glob(f"{data_folder}/*.txt"))
         for file_path in all_files:
@@ -71,7 +84,7 @@ class NamesDataset(Dataset, Generic[OutputType, LabelType]):
                 logging.info(
                     f"Maximum number of countries {self.max_countries_count} reached. Skipping further countries."
                 )
-                return names, countries
+                return names, countries, list(tokens)
 
             country_name = file_path.split("/")[-1].split(".")[0]
             logging.info(f"Loading names for country: {country_name} from {file_path}")
@@ -87,42 +100,46 @@ class NamesDataset(Dataset, Generic[OutputType, LabelType]):
                         logging.info(
                             f"Maximum number of names {self.max_names_count} reached. Skipping further names."
                         )
-                        return names, countries
+                        return names, countries, list(tokens)
 
                     name = line.strip()
                     if name:
                         if self.transform_input:
                             name = self.transform_input(name)
+                        tokens.update(name)
                         names.append(NameLabel(name=name, country_idx=country_idx))
 
-        return names, countries
+        return names, countries, list(tokens)
 
-    def __len__(self):
-        """
-        Returns the total number of names in the dataset.
-        """
-        return len(self.names)
+    def name_to_tensor(self, name: str) -> torch.Tensor:
+        # shape [1, sequence_length, num_classes]
+        return (
+            F.one_hot(
+                torch.tensor([self.token_to_index[c] for c in name]),
+                num_classes=len(self.index_to_token),
+            )
+            .unsqueeze(0)
+            .float()
+        )
 
-    def __getitem__(self, idx) -> tuple[OutputType, LabelType]:
-        """
-        Retrieves the name and its associated country for a given index.
+    def tensor_to_name(self, tensor: torch.Tensor) -> str:
+        # tensor shape [1, sequence_length, num_classes]
+        indices = tensor.argmax(dim=2).squeeze(0)
+        return "".join(self.index_to_token[int(i.item())] for i in indices)
 
-        Args:
-            idx (int): Index of the name to retrieve.
+    def country_index_to_tensor(self, label_index: int) -> torch.Tensor:
+        # shape [1, num_classes]
+        return (
+            F.one_hot(torch.tensor(label_index), num_classes=len(self.countries))
+            .unsqueeze(0)
+            .float()
+        )
 
-        Returns:
-            The name and the corresponding country name.
+    def tensor_to_country_index(self, tensor: torch.Tensor) -> int:
+        # tensor shape [1, num_classes]
+        return int(tensor.argmax(dim=1).item())
 
-        Raises:
-            IndexError: If the index is out of range.
-        """
-        if idx < 0 or idx >= len(self.names):
-            raise IndexError(f"{idx=} out of range")
-
-        name, country_idx = self.names[idx]
-        if self.transform_output:
-            name = self.transform_output(name)
-        country = self.countries[country_idx]
-        if self.transform_label:
-            country = self.transform_label(country)
-        return name, country
+    def tensor_to_country(self, tensor: torch.Tensor) -> str:
+        # tensor shape [1, num_classes]
+        index = self.tensor_to_country_index(tensor)
+        return self.countries[index]

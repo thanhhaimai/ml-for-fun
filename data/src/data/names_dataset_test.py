@@ -39,13 +39,14 @@ def test_dataset_initialization(test_dir):
 
 def test_get_item_max_countries_count(test_dir):
     dataset = NamesDataset(data_folder=test_dir, max_countries_count=1)
-    name, country = dataset[0]
-    assert name == "John"
-    assert country == "English"
 
-    name, country = dataset[1]
-    assert name == "Jane"
-    assert country == "English"
+    name_tensor, country_tensor = dataset[0]
+    assert dataset.tensor_to_name(name_tensor) == dataset.names[0][0]
+    assert dataset.tensor_to_country(country_tensor) == dataset.countries[0]
+
+    name_tensor, country_tensor = dataset[1]
+    assert dataset.tensor_to_name(name_tensor) == dataset.names[1][0]
+    assert dataset.tensor_to_country(country_tensor) == dataset.countries[0]
 
     with pytest.raises(IndexError):
         dataset[2]
@@ -53,9 +54,10 @@ def test_get_item_max_countries_count(test_dir):
 
 def test_get_item_max_names_count(test_dir):
     dataset = NamesDataset(data_folder=test_dir, max_names_count=1)
-    name, country = dataset[0]
-    assert name == "John"
-    assert country == "English"
+
+    name_tensor, country_tensor = dataset[0]
+    assert dataset.tensor_to_name(name_tensor) == "John"
+    assert dataset.tensor_to_country(country_tensor) == "English"
 
     with pytest.raises(IndexError):
         dataset[1]
@@ -65,6 +67,24 @@ def test_index_out_of_range(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     with pytest.raises(IndexError):
         dataset[10]
+
+
+def test_non_existent_folder():
+    with pytest.raises(FileNotFoundError):
+        NamesDataset(data_folder="/non/existent/folder")
+
+
+def test_dataset_with_transform(test_dir):
+    dataset = NamesDataset(
+        data_folder=test_dir,
+        transform_input=lambda x: x.upper(),
+    )
+    assert dataset.names == [
+        ("JOHN", 0),
+        ("JANE", 0),
+        ("JEAN", 1),
+        ("MARIE", 1),
+    ]
 
 
 def test_real_data_initialization(real_data_dir):
@@ -78,14 +98,38 @@ def test_real_data_initialization(real_data_dir):
 
 def test_real_data_get_item(real_data_dir):
     dataset = NamesDataset(
-        data_folder=real_data_dir, max_countries_count=5, max_names_count=10
+        data_folder=real_data_dir,
+        max_countries_count=5,
+        max_names_count=10,
     )
-    name, country = dataset[0]
-    assert isinstance(name, str)  # Ensure name is a string
-    assert isinstance(country, str)  # Ensure country is a string
-    assert country in dataset.countries  # Ensure country is valid
+    name_tensor, country_tensor = dataset[0]
+    assert dataset.tensor_to_country(country_tensor) in dataset.countries
+    country_index = dataset.countries.index(dataset.tensor_to_country(country_tensor))
+    name = dataset.tensor_to_name(name_tensor)
+    assert (name, country_index) in dataset.names
 
 
-def test_non_existent_folder():
-    with pytest.raises(FileNotFoundError):
-        NamesDataset(data_folder="/non/existent/folder")
+def test_name_to_tensor(test_dir):
+    dataset = NamesDataset(data_folder=test_dir)
+    tensor = dataset.name_to_tensor("John")
+    assert tensor.shape[2] == len(dataset.index_to_token)  # Check token dimension
+
+
+def test_tensor_to_name(test_dir):
+    dataset = NamesDataset(data_folder=test_dir)
+    tensor = dataset.name_to_tensor("John")
+    name = dataset.tensor_to_name(tensor)
+    assert name == "John"
+
+
+def test_country_index_to_tensor(test_dir):
+    dataset = NamesDataset(data_folder=test_dir)
+    tensor = dataset.country_index_to_tensor(0)
+    assert tensor.shape[1] == len(dataset.countries)  # Check country dimension
+
+
+def test_tensor_to_country(test_dir):
+    dataset = NamesDataset(data_folder=test_dir)
+    tensor = dataset.country_index_to_tensor(0)
+    country = dataset.tensor_to_country(tensor)
+    assert country == "English"
