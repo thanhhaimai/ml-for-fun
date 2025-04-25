@@ -131,14 +131,14 @@ class NamesDataset(Dataset):
                 torch.tensor([self.token_to_index[c] for c in name]),
                 num_classes=len(self.index_to_token),
             )
-            .unsqueeze(0)
+            .unsqueeze(1)
             .float()
         )
 
     def tensor_to_name(self, tensor: torch.Tensor) -> str:
-        # tensor shape [1, sequence_length, num_classes]
-        indices = tensor.argmax(dim=2).squeeze(0)
-        return "".join(self.index_to_token[int(i.item())] for i in indices)
+        # tensor shape [sequence_length, 1, num_classes]
+        indices = tensor.argmax(dim=2).squeeze(1)
+        return "".join(self.index_to_token[i] for i in indices)
 
     def country_index_to_tensor(self, label_index: int) -> torch.Tensor:
         # shape [1, num_classes]

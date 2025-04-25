@@ -91,7 +91,6 @@ def test_real_data_initialization(real_data_dir):
     dataset = NamesDataset(
         data_folder=real_data_dir, max_countries_count=5, max_names_count=10
     )
-    print(dataset.names)
     assert len(dataset) == 10  # We have enough real data for 10 names
     assert len(dataset.countries) == 1  # The first country already exhausts 10 names
 
@@ -112,6 +111,8 @@ def test_real_data_get_item(real_data_dir):
 def test_name_to_tensor(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     tensor = dataset.name_to_tensor("John")
+    assert tensor.shape[0] == len("John")  # Check sequence length dimension
+    assert tensor.shape[1] == 1  # Check batch size dimension
     assert tensor.shape[2] == len(dataset.index_to_token)  # Check token dimension
 
 
