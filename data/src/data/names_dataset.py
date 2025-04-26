@@ -43,8 +43,11 @@ class NamesDataset(Dataset):
         logging.info(f"Total names loaded: {len(self.names)}")
         logging.info(f"Total unique tokens loaded: {len(tokens)}")
 
+        # Include a padding token at index 0
         self.index_to_token = tokens
-        self.token_to_index = {c: i for i, c in enumerate(tokens)}
+        self.token_to_index = {c: i for i, c in enumerate(self.index_to_token)}
+        print(f"{self.index_to_token=}")
+        print(f"{self.token_to_index=}")
 
         self.names_tensors = []
         self.countries_tensors = []
@@ -109,7 +112,7 @@ class NamesDataset(Dataset):
                         tokens.update(name)
                         names.append(NameLabel(name=name, country_idx=country_idx))
 
-        return names, countries, list(tokens)
+        return names, countries, list(sorted(tokens))
 
     def to(self, device):
         """
@@ -129,21 +132,17 @@ class NamesDataset(Dataset):
         ]
 
     def name_to_tensor(self, name: str) -> torch.Tensor:
-        # shape [1, sequence_length, num_classes]
-        return (
-            F.one_hot(
-                torch.tensor([self.token_to_index[c] for c in name]),
-                num_classes=len(self.index_to_token),
-            )
-            .unsqueeze(1)
-            .float()
-        )
+        # shape [sequence_length, num_classes]
+        return F.one_hot(
+            torch.tensor([self.token_to_index[c] for c in name]),
+            num_classes=len(self.index_to_token),
+        ).float()
 
     def tensor_to_name(self, tensor: torch.Tensor) -> str:
-        # tensor shape [sequence_length, 1, num_classes]
-        indices = tensor.argmax(dim=2).squeeze(1)
+        # Shape [sequence_length, num_classes]
+        indices = tensor.argmax(dim=1)
         return "".join(self.index_to_token[i] for i in indices)
 
     def country_index_to_tensor(self, label_index: int) -> torch.Tensor:
-        # Return a single integer index as a tensor, compatible with CrossEntropyLoss
+        # Shape scalar
         return torch.tensor(label_index, dtype=torch.long)

@@ -115,8 +115,7 @@ def test_name_to_tensor(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     tensor = dataset.name_to_tensor("John")
     assert tensor.shape[0] == len("John")  # Check sequence length dimension
-    assert tensor.shape[1] == 1  # Check batch size dimension
-    assert tensor.shape[2] == len(dataset.index_to_token)  # Check token dimension
+    assert tensor.shape[1] == len(dataset.index_to_token)  # Check token dimension
 
 
 def test_tensor_to_name(test_dir):
@@ -129,7 +128,7 @@ def test_tensor_to_name(test_dir):
 def test_country_index_to_tensor(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     tensor = dataset.country_index_to_tensor(0)
-    assert tensor == torch.tensor([[0]])
+    assert tensor == torch.tensor([0])
 
 
 def test_to_method(test_dir):
