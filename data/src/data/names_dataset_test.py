@@ -1,6 +1,7 @@
 import os
 
 import pytest
+import torch
 
 from data.names_dataset import NamesDataset
 
@@ -41,12 +42,14 @@ def test_get_item_max_countries_count(test_dir):
     dataset = NamesDataset(data_folder=test_dir, max_countries_count=1)
 
     name_tensor, country_tensor = dataset[0]
+    country_index = int(country_tensor.squeeze(0).item())
     assert dataset.tensor_to_name(name_tensor) == dataset.names[0][0]
-    assert dataset.tensor_to_country(country_tensor) == dataset.countries[0]
+    assert country_index == dataset.names[0][1]
 
     name_tensor, country_tensor = dataset[1]
+    country_index = int(country_tensor.squeeze(0).item())
     assert dataset.tensor_to_name(name_tensor) == dataset.names[1][0]
-    assert dataset.tensor_to_country(country_tensor) == dataset.countries[0]
+    assert country_index == dataset.names[1][1]
 
     with pytest.raises(IndexError):
         dataset[2]
@@ -56,8 +59,9 @@ def test_get_item_max_names_count(test_dir):
     dataset = NamesDataset(data_folder=test_dir, max_names_count=1)
 
     name_tensor, country_tensor = dataset[0]
+    country_index = int(country_tensor.squeeze(0).item())
     assert dataset.tensor_to_name(name_tensor) == "John"
-    assert dataset.tensor_to_country(country_tensor) == "English"
+    assert dataset.countries[country_index] == "English"
 
     with pytest.raises(IndexError):
         dataset[1]
@@ -102,8 +106,7 @@ def test_real_data_get_item(real_data_dir):
         max_names_count=10,
     )
     name_tensor, country_tensor = dataset[0]
-    assert dataset.tensor_to_country(country_tensor) in dataset.countries
-    country_index = dataset.countries.index(dataset.tensor_to_country(country_tensor))
+    country_index = int(country_tensor.squeeze(0).item())
     name = dataset.tensor_to_name(name_tensor)
     assert (name, country_index) in dataset.names
 
@@ -126,11 +129,4 @@ def test_tensor_to_name(test_dir):
 def test_country_index_to_tensor(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     tensor = dataset.country_index_to_tensor(0)
-    assert tensor.shape[1] == len(dataset.countries)  # Check country dimension
-
-
-def test_tensor_to_country(test_dir):
-    dataset = NamesDataset(data_folder=test_dir)
-    tensor = dataset.country_index_to_tensor(0)
-    country = dataset.tensor_to_country(tensor)
-    assert country == "English"
+    assert tensor == torch.tensor([[0]])

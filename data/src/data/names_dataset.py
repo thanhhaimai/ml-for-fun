@@ -141,18 +141,5 @@ class NamesDataset(Dataset):
         return "".join(self.index_to_token[i] for i in indices)
 
     def country_index_to_tensor(self, label_index: int) -> torch.Tensor:
-        # shape [1, num_classes]
-        return (
-            F.one_hot(torch.tensor(label_index), num_classes=len(self.countries))
-            .unsqueeze(0)
-            .float()
-        )
-
-    def tensor_to_country_index(self, tensor: torch.Tensor) -> int:
-        # tensor shape [1, num_classes]
-        return int(tensor.argmax(dim=1).item())
-
-    def tensor_to_country(self, tensor: torch.Tensor) -> str:
-        # tensor shape [1, num_classes]
-        index = self.tensor_to_country_index(tensor)
-        return self.countries[index]
+        # Return a single integer index as a tensor, compatible with CrossEntropyLoss
+        return torch.tensor(label_index, dtype=torch.long)
