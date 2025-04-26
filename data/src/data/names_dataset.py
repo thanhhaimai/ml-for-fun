@@ -115,6 +115,10 @@ class NamesDataset(Dataset):
         """
         Moves the dataset tensors to the specified device.
         """
+        if self.names_tensors[0].device == device:
+            logging.info("Tensors are already on the target device.")
+            return
+
         self.names_tensors = [
             name_tensor.to(device, non_blocking=True)
             for name_tensor in self.names_tensors

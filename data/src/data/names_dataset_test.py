@@ -130,3 +130,18 @@ def test_country_index_to_tensor(test_dir):
     dataset = NamesDataset(data_folder=test_dir)
     tensor = dataset.country_index_to_tensor(0)
     assert tensor == torch.tensor([[0]])
+
+
+def test_to_method(test_dir):
+    dataset = NamesDataset(data_folder=test_dir)
+    device = torch.device("cpu")
+
+    # Move tensors to CPU
+    dataset.to(device)
+    assert dataset.names_tensors[0].device == device
+    assert dataset.countries_tensors[0].device == device
+
+    # Move tensors again to the same device
+    dataset.to(device)  # Should not perform unnecessary operations
+    assert dataset.names_tensors[0].device == device
+    assert dataset.countries_tensors[0].device == device
