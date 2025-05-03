@@ -32,6 +32,7 @@ class LossMetric(Metric):
         super().__init__(num_epochs, batch_size)
         self.epoch_losses = torch.zeros(num_epochs)
         self.loss = 0
+        self.num_batches = 0
 
     def update(
         self,
@@ -40,18 +41,15 @@ class LossMetric(Metric):
         batch_loss: torch.Tensor,
     ):
         """
-        batch_loss: [1]
+        batch_loss: scalar
         """
-        if batch_loss.shape != (1,):
-            raise ValueError(
-                f"Expect batch_loss.shape == (1,), but got {batch_loss.shape}"
-            )
-
         self.loss += batch_loss.item()
+        self.num_batches += 1
 
     def on_epoch_complete(self, epoch_idx: int):
-        self.loss /= self.batch_size
-        self.epoch_losses[epoch_idx] = self.loss
+        self.epoch_losses[epoch_idx] = self.loss / self.num_batches
+        self.loss = 0
+        self.num_batches = 0
 
 
 class AccuracyMetric(Metric):
@@ -64,7 +62,8 @@ class AccuracyMetric(Metric):
         super().__init__(num_epochs, batch_size)
         self.num_classes = num_classes
         self.epoch_corrects = torch.zeros(num_epochs)
-        self.correct = 0
+        self.total_correct = 0
+        self.total_items = 0
 
     def update(
         self,
@@ -88,11 +87,13 @@ class AccuracyMetric(Metric):
 
         # predictions: [N]
         predictions = outputs.argmax(dim=1)
-        self.correct += (predictions == labels).sum(0).item()
+        self.total_correct += (predictions == labels).sum(0).item()
+        self.total_items += len(outputs)
 
     def on_epoch_complete(self, epoch_idx: int):
-        self.correct /= self.batch_size
-        self.epoch_corrects[epoch_idx] = self.correct
+        self.epoch_corrects[epoch_idx] = self.total_correct / self.total_items
+        self.total_correct = 0
+        self.total_items = 0
 
 
 class ConfusionMatrixMetric(Metric):
