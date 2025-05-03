@@ -1,16 +1,13 @@
 [project]
-name = "notebooks"
+name = "common"
 version = "0.1.0"
 description = "Add your description here"
-readme = "README.md"
 classifiers = ["Private :: Do Not Upload"]
 requires-python = ">=3.13"
 dependencies = [
-    "matplotlib>=3.10.1",
-    "numpy>=2.2.5",
     "torch>=2.7.0",
 ]
 
-[tool.uv.sources]
-data = { workspace = true }
-common = { workspace = true }
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
