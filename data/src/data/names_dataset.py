@@ -55,6 +55,8 @@ class NamesDataset(Dataset):
             self.names_tensors.append(self.name_to_tensor(name))
             self.countries_tensors.append(self.country_index_to_tensor(country_idx))
 
+        print(f"{list(enumerate(self.countries))=}")
+
     def __len__(self):
         return len(self.names)
 

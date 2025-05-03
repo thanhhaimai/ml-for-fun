@@ -1,3 +1,5 @@
+import math
+
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
@@ -13,8 +15,9 @@ class Learner:
         self.optimizer = optimizer
         self.criterion = criterion
 
-    def train(self, train_loader: DataLoader, train_metrics: list[Metric]):
+    def train(self, train_loader: DataLoader, train_metrics: list[Metric]) -> float:
         self.model.train()
+        epoch_loss = 0
         for inputs, labels in train_loader:
             outputs = self.model(inputs)
             loss = self.criterion(outputs, labels)
@@ -22,33 +25,65 @@ class Learner:
             loss.backward()
             self.optimizer.step()
 
+            epoch_loss += loss.item()
+
             for metric in train_metrics:
                 metric.update(outputs, labels, loss)
 
-    def eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]):
+        return epoch_loss / len(train_loader)
+
+    def eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
         self.model.eval()
+        epoch_loss = 0
         with torch.no_grad():
             for inputs, labels in eval_loader:
                 outputs = self.model(inputs)
                 loss = self.criterion(outputs, labels)
+                epoch_loss += loss.item()
 
                 for metric in eval_metrics:
                     metric.update(outputs, labels, loss)
+
+        return epoch_loss / len(eval_loader)
 
     def fit(
         self,
         train_loader: DataLoader,
         eval_loader: DataLoader,
         num_epochs: int,
+        patience: int,
         train_metrics: list[Metric],
         eval_metrics: list[Metric],
-    ):
+    ) -> tuple[list[float], list[float]]:
+        best_eval_loss = math.inf
+        train_losses = []
+        eval_losses = []
+        current_patience = 0
         for epoch in range(num_epochs):
-            self.train(train_loader, train_metrics)
-            self.eval(eval_loader, eval_metrics)
+            train_loss = self.train(train_loader, train_metrics)
+            eval_loss = self.eval(eval_loader, eval_metrics)
 
             for metric in train_metrics:
                 metric.on_epoch_complete(epoch)
 
             for metric in eval_metrics:
                 metric.on_epoch_complete(epoch)
+
+            print(
+                f"{epoch}/{num_epochs} \tTrain loss \t{train_loss:.4f} \tEval loss \t{eval_loss:.4f}"
+            )
+
+            train_losses.append(train_loss)
+            eval_losses.append(eval_loss)
+
+            if eval_loss < best_eval_loss:
+                best_eval_loss = eval_loss
+                current_patience = 0
+            else:
+                current_patience += 1
+
+            if current_patience >= patience:
+                print(f"Early stopping at epoch {epoch}")
+                break
+
+        return train_losses, eval_losses
