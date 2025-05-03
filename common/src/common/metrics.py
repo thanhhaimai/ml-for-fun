@@ -105,7 +105,7 @@ class ConfusionMatrixMetric(Metric):
         """
         super().__init__(num_epochs, batch_size)
         self.num_classes = num_classes
-        self.confusion_matrix = torch.zeros(num_classes, num_classes)
+        self.confusion_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
 
     def update(
         self,
@@ -129,9 +129,10 @@ class ConfusionMatrixMetric(Metric):
 
         # predictions: [N]
         predictions = outputs.argmax(dim=1)
-        for i in range(self.batch_size):
-            print(f"{i=} {labels[i]=}, {predictions[i]=}")
-            self.confusion_matrix[labels[i], predictions[i]] += 1
+        for i in range(len(labels)):
+            u = int(labels[i].item())
+            v = int(predictions[i].item())
+            self.confusion_matrix[u, v] += 1
 
     def on_epoch_complete(self, epoch_idx: int):
         # Track the confusion matrix for the whole training
