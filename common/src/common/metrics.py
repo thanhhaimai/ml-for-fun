@@ -4,11 +4,9 @@ import torch
 
 
 class Metric:
-    def __init__(self, batch_size: int):
-        """
-        batch_size: N
-        """
-        self.batch_size = batch_size
+    def __init__(self):
+        """ """
+        pass
 
     def update(
         self,
@@ -31,12 +29,11 @@ class Metric:
 
 
 class AccuracyMetric(Metric):
-    def __init__(self, batch_size: int, num_classes: int):
+    def __init__(self, num_classes: int):
         """
-        batch_size: N
         num_classes: C
         """
-        super().__init__(batch_size)
+        super().__init__()
         self.num_classes = num_classes
         self.epoch_corrects = []
         self.total_correct = 0
@@ -77,14 +74,14 @@ class AccuracyMetric(Metric):
 
 
 class ConfusionMatrixMetric(Metric):
-    def __init__(self, batch_size: int, num_classes: int):
+    def __init__(self, num_classes: int, normalize: bool):
         """
-        batch_size: N
         num_classes: C
         """
-        super().__init__(batch_size)
+        super().__init__()
         self.num_classes = num_classes
         self.confusion_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
+        self.normalize = normalize
 
     def update(
         self,
@@ -116,10 +113,18 @@ class ConfusionMatrixMetric(Metric):
         pass
 
     def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        format = "d"
+        if self.normalize:
+            self.confusion_matrix = (
+                self.confusion_matrix.float()
+                / self.confusion_matrix.sum(dim=1, keepdim=True)
+            )
+            format = ".2f"
+
         sns.heatmap(
             data=self.confusion_matrix,
             annot=True,
-            fmt="d",
+            fmt=format,
             ax=ax,
         )
 
@@ -129,12 +134,14 @@ class ConfusionMatrixMetric(Metric):
 
 
 class PrecisionMetric(Metric):
-    def __init__(self, batch_size: int, num_classes: int):
+    def __init__(self, num_classes: int):
         """
+        Corrects / Predicteds (predictions == labels) / predictions
+
         batch_size: N
         num_classes: C
         """
-        super().__init__(batch_size)
+        super().__init__()
         self.num_classes = num_classes
         self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
         self.predicted_positives = torch.zeros(num_classes, dtype=torch.int64)
@@ -202,12 +209,14 @@ class PrecisionMetric(Metric):
 
 
 class RecallMetric(Metric):
-    def __init__(self, batch_size: int, num_classes: int):
+    def __init__(self, num_classes: int):
         """
+        Corrects / Labels (predictions == labels / labels)
+
         batch_size: N
         num_classes: C
         """
-        super().__init__(batch_size)
+        super().__init__()
         self.num_classes = num_classes
         self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
         self.actual_positives = torch.zeros(num_classes, dtype=torch.int64)
