@@ -68,7 +68,7 @@ class Learner:
         train_loader: DataLoader,
         eval_loader: DataLoader,
         num_epochs: int,
-        patience: int,
+        patience: int | None,
         train_metrics: list[Metric],
         eval_metrics: list[Metric],
     ) -> tuple[list[float], list[float]]:
@@ -92,6 +92,9 @@ class Learner:
 
             train_losses.append(train_loss)
             eval_losses.append(eval_loss)
+
+            if patience is None:
+                continue
 
             if eval_loss < best_eval_loss:
                 best_eval_loss = eval_loss
