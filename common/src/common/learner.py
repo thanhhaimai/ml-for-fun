@@ -46,6 +46,23 @@ class Learner:
 
         return epoch_loss / len(eval_loader)
 
+    def final_eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
+        self.model.eval()
+        epoch_loss = 0
+        with torch.no_grad():
+            for inputs, labels in eval_loader:
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
+                epoch_loss += loss.item()
+
+                for metric in eval_metrics:
+                    metric.update(outputs, labels, loss)
+
+            for metric in eval_metrics:
+                metric.on_epoch_complete(0)
+
+        return epoch_loss / len(eval_loader)
+
     def fit(
         self,
         train_loader: DataLoader,
