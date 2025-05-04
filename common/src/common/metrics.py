@@ -282,3 +282,99 @@ class RecallMetric(Metric):
 
     def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
         ax.plot(self.epoch_recalls, label=label)
+
+
+class F1ScoreMetric(Metric):
+    def __init__(self, num_classes: int):
+        """
+        Calculates the macro-averaged F1 score.
+
+        num_classes: C
+        """
+        super().__init__()
+        self.num_classes = num_classes
+        self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.predicted_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.actual_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.epoch_f1_scores = []
+
+    def update(
+        self,
+        outputs: torch.Tensor,
+        labels: torch.Tensor,
+        batch_loss: torch.Tensor,
+    ):
+        """
+        outputs: [N, C]
+        labels: [N]
+        """
+        if outputs.shape[0] != labels.shape[0]:
+            raise ValueError(
+                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
+            )
+
+        if outputs.shape[1] != self.num_classes:
+            raise ValueError(
+                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
+            )
+
+        # predictions: [N]
+        predictions = outputs.argmax(dim=1)
+        # is_correct: [N]
+        is_correct_mask = predictions == labels
+        # true_positive_labels: [K] -- where K is the number of true positives
+        true_positive_labels = labels[is_correct_mask]
+
+        # tp_counts (true positives): [C]
+        tp_counts = torch.bincount(true_positive_labels, minlength=self.num_classes)
+        # pp_counts (predicted positives): [C]
+        pp_counts = torch.bincount(predictions, minlength=self.num_classes)
+        # ap_counts (actual positives): [C]
+        ap_counts = torch.bincount(labels, minlength=self.num_classes)
+
+        self.true_positives += tp_counts
+        self.predicted_positives += pp_counts
+        self.actual_positives += ap_counts
+
+    def on_epoch_complete(self, epoch_idx: int):
+        # precisions: [C]
+        precisions = torch.zeros(self.num_classes, dtype=torch.float)
+        # recalls: [C]
+        recalls = torch.zeros(self.num_classes, dtype=torch.float)
+
+        # Calculate precision
+        has_pp_mask = self.predicted_positives > 0
+        precisions[has_pp_mask] = (
+            self.true_positives[has_pp_mask].float()
+            / self.predicted_positives[has_pp_mask].float()
+        )
+
+        # Calculate recall
+        has_ap_mask = self.actual_positives > 0
+        recalls[has_ap_mask] = (
+            self.true_positives[has_ap_mask].float()
+            / self.actual_positives[has_ap_mask].float()
+        )
+
+        sum_precisions_recalls = precisions + recalls
+        product_precisions_recalls = precisions * recalls
+        has_f1_mask = sum_precisions_recalls > 0
+
+        f1_scores = torch.zeros(self.num_classes, dtype=torch.float)
+        f1_scores[has_f1_mask] = (
+            2
+            * product_precisions_recalls[has_f1_mask]
+            / sum_precisions_recalls[has_f1_mask]
+        )
+
+        # Compute mean F1 score (macro average)
+        mean_f1_score = f1_scores.mean().item()
+        self.epoch_f1_scores.append(mean_f1_score)
+
+        # Reset counts for the next epoch
+        self.true_positives.zero_()
+        self.predicted_positives.zero_()
+        self.actual_positives.zero_()
+
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.plot(self.epoch_f1_scores, label=label)
