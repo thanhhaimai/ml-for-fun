@@ -104,3 +104,17 @@ class Learner:
                 break
 
         return train_losses, eval_losses
+
+    def predict(self, input: torch.Tensor) -> int:
+        _, idx = self.predict_topk(input, k=1)
+        return int(idx.item())
+
+    def predict_topk(
+        self, input: torch.Tensor, k: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        self.model.eval()
+        with torch.no_grad():
+            output = self.model(input)
+            likelihoods, indices = torch.topk(output, k=k)
+            likelihoods = likelihoods.exp() / output.exp().sum()
+            return likelihoods, indices
