@@ -1,3 +1,5 @@
+import matplotlib.axes
+import seaborn as sns
 import torch
 
 
@@ -23,6 +25,9 @@ class Metric:
 
     def on_epoch_complete(self, epoch_idx: int):
         pass
+
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        raise NotImplementedError
 
 
 class AccuracyMetric(Metric):
@@ -67,6 +72,9 @@ class AccuracyMetric(Metric):
         self.total_correct = 0
         self.total_items = 0
 
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.plot(self.epoch_corrects, label=label)
+
 
 class ConfusionMatrixMetric(Metric):
     def __init__(self, batch_size: int, num_classes: int):
@@ -106,6 +114,18 @@ class ConfusionMatrixMetric(Metric):
     def on_epoch_complete(self, epoch_idx: int):
         # Track the confusion matrix for the whole training
         pass
+
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        sns.heatmap(
+            data=self.confusion_matrix,
+            annot=True,
+            fmt="d",
+            ax=ax,
+        )
+
+        ax.set_title("Confusion Matrix")
+        ax.set_xlabel("Predicted")
+        ax.set_ylabel("Label")
 
 
 class PrecisionMetric(Metric):
@@ -177,6 +197,9 @@ class PrecisionMetric(Metric):
         self.true_positives.zero_()
         self.predicted_positives.zero_()
 
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.plot(self.epoch_precisions, label=label)
+
 
 class RecallMetric(Metric):
     def __init__(self, batch_size: int, num_classes: int):
@@ -247,3 +270,6 @@ class RecallMetric(Metric):
         # Reset counts for the next epoch
         self.true_positives.zero_()
         self.actual_positives.zero_()
+
+    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.plot(self.epoch_recalls, label=label)
