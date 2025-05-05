@@ -109,15 +109,34 @@ class Learner:
         return train_losses, eval_losses
 
     def predict(self, input: torch.Tensor) -> int:
+        """
+        seq_length: S
+        input_size: D
+
+        input: [S, D]
+        """
         _, idx = self.predict_topk(input, k=1)
         return int(idx.item())
 
     def predict_topk(
         self, input: torch.Tensor, k: int
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        seq_length: S
+        input_size: D
+
+        input: [S, D]
+
+        returns:
+            likelihoods: [K]
+            indices: [K]
+        """
+        # Add a batch dimension to the input
+        # input: [S, D] -> [S, 1, D]
+        input = input.unsqueeze(1)
         self.model.eval()
         with torch.no_grad():
             output = self.model(input)
             likelihoods, indices = torch.topk(output, k=k)
             likelihoods = likelihoods.exp() / output.exp().sum()
-            return likelihoods, indices
+            return likelihoods.squeeze(0), indices.squeeze(0)
