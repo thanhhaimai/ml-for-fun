@@ -136,7 +136,16 @@ class Learner:
         input = input.unsqueeze(1)
         self.model.eval()
         with torch.no_grad():
+            # output: [1, C]
             output = self.model(input)
-            likelihoods, indices = torch.topk(output, k=k)
-            likelihoods = likelihoods.exp() / output.exp().sum()
-            return likelihoods.squeeze(0), indices.squeeze(0)
+            # probabilities: [1, C]
+            probabilities = torch.softmax(output, dim=1)
+
+            # topk_logits: [1, K]
+            # indices: [1, K]
+            _topk_logits, indices = torch.topk(output, k=k, dim=1)
+
+            # topk_probabilities: [1, K]
+            topk_probabilities = torch.gather(probabilities, dim=1, index=indices)
+
+            return topk_probabilities.squeeze(0), indices.squeeze(0)
