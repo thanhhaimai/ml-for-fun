@@ -23,64 +23,19 @@ class Metric:
         pass
 
 
-class AccuracyMetric(Metric):
-    def __init__(self, num_classes: int):
-        """
-        num_classes: C
-        """
-        super().__init__()
-        self.num_classes = num_classes
-        self.epoch_corrects = []
-        self.total_correct = 0
-        self.total_items = 0
-
-    def update(
-        self,
-        outputs: torch.Tensor,
-        labels: torch.Tensor,
-    ):
-        """
-        outputs: [N, C]
-        labels: [N]
-        """
-        if outputs.shape[0] != labels.shape[0]:
-            raise ValueError(
-                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
-            )
-
-        if outputs.shape[1] != self.num_classes:
-            raise ValueError(
-                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
-            )
-
-        # predictions: [N]
-        predictions = outputs.argmax(dim=1)
-        self.total_correct += (predictions == labels).sum(0).item()
-        self.total_items += len(outputs)
-
-    def on_epoch_complete(self, epoch_idx: int):
-        self.epoch_corrects.append(self.total_correct / self.total_items)
-        self.total_correct = 0
-        self.total_items = 0
-
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.plot(self.epoch_corrects, label=label)
-
-
 class ConfusionMatrixMetric(Metric):
-    def __init__(self, classes: list[str], normalize: bool):
+    def __init__(self, classes: list[str], eps: float = 1e-6):
         """
         num_classes: C
         """
         super().__init__()
         self.classes = classes
         self.num_classes = len(classes)
-        self.confusion_matrix = torch.zeros(
-            self.num_classes,
-            self.num_classes,
-            dtype=torch.int64,
-        )
-        self.normalize = normalize
+        self.eps = eps
+
+        # All confusion matrices across epochs
+        self.epoch_confusion_matrices: list[torch.Tensor] = []
+        self.reset_confusion_matrix()
 
     def update(
         self,
@@ -88,8 +43,8 @@ class ConfusionMatrixMetric(Metric):
         labels: torch.Tensor,
     ):
         """
-        outputs: [N, C]
-        labels: [N]
+        outputs: [N, C] -- batch of logits
+        labels: [N] -- batch of label indices
         """
         if outputs.shape[0] != labels.shape[0]:
             raise ValueError(
@@ -108,300 +63,117 @@ class ConfusionMatrixMetric(Metric):
 
     def on_epoch_complete(self, epoch_idx: int):
         # Track the confusion matrix for the whole training
-        pass
+        self.epoch_confusion_matrices.append(self.confusion_matrix)
+        self.reset_confusion_matrix()
 
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        format = "d"
-        if self.normalize:
-            self.confusion_matrix = (
-                self.confusion_matrix.float()
-                / self.confusion_matrix.sum(dim=1, keepdim=True)
-            )
+    def reset_confusion_matrix(self):
+        self.confusion_matrix = torch.zeros(
+            self.num_classes,
+            self.num_classes,
+            dtype=torch.int64,
+        )
+
+    @property
+    def accuracies(self):
+        """
+        Accuracies for all epochs
+
+        E: number of epochs
+        C: number of classes
+        """
+        # shape: [E, C, C]
+        matrices = torch.stack(self.epoch_confusion_matrices, dim=0)
+        # shape: [E, C]
+        diagonals = matrices.diagonal(dim1=-2, dim2=-1)
+        # shape: [E] / [E] = [E]
+        return diagonals.sum(dim=-1) / matrices.sum(dim=-1).sum(dim=-1)
+
+    @property
+    def class_precisions(self):
+        """
+        Precisions for all classes
+
+        C: number of classes
+        """
+        # shape: [C, C]
+        matrix = self.epoch_confusion_matrices[-1]
+        # shape: [C] / [C] = [C]
+        return matrix.diag() / (matrix.sum(dim=0) + self.eps)
+
+    @property
+    def class_recalls(self):
+        """
+        Recalls for all classes
+
+        C: number of classes
+        """
+        # shape: [C, C]
+        matrix = self.epoch_confusion_matrices[-1]
+        # shape: [C] / [C] = [C]
+        return matrix.diag() / (matrix.sum(dim=1) + self.eps)
+
+    @property
+    def class_f1_scores(self):
+        """
+        F1 scores for all classes
+
+        C: number of classes
+        """
+        # shape: [C]
+        precisions = self.class_precisions
+        # shape: [C]
+        recalls = self.class_recalls
+        # shape: [C] * [C] / [C] = [C]
+        return 2 * (precisions * recalls) / (precisions + recalls + self.eps)
+
+    def plot_confusion_matrix(self, ax: matplotlib.axes.Axes, normalize: bool = False):
+        if normalize:
+            matrix = self.epoch_confusion_matrices[
+                -1
+            ].float() / self.epoch_confusion_matrices[-1].sum(dim=1, keepdim=True)
             format = ".2f"
+        else:
+            matrix = self.epoch_confusion_matrices[-1]
+            format = "d"
 
         sns.heatmap(
-            data=self.confusion_matrix,
+            data=matrix,
             annot=True,
             fmt=format,
             ax=ax,
         )
 
-        ax.set_title("Confusion Matrix")
         ax.set_xlabel("Predicted")
         ax.set_ylabel("Label")
-        ax.set_xticklabels(self.classes, rotation=90)
+        ax.set_xticklabels(self.classes, rotation=45, ha="right")
         ax.set_yticklabels(self.classes, rotation=0)
 
+    def plot_accuracies(self, ax: matplotlib.axes.Axes, label: str):
+        ax.plot(self.accuracies, label=label)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Accuracy")
+        ax.legend()
 
-class PrecisionMetric(Metric):
-    def __init__(self, classes: list[str]):
-        """
-        Corrects / Predicteds (predictions == labels) / predictions
-
-        batch_size: N
-        num_classes: C
-        """
-        super().__init__()
-        self.classes = classes
-        self.num_classes = len(classes)
-        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.predicted_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.epoch_precisions = []
-        self.class_precisions = torch.zeros(self.num_classes, dtype=torch.float)
-
-    def update(
-        self,
-        outputs: torch.Tensor,
-        labels: torch.Tensor,
-    ):
-        """
-        outputs: [N, C]
-        labels: [N]
-        """
-        if outputs.shape[0] != labels.shape[0]:
-            raise ValueError(
-                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
-            )
-
-        if outputs.shape[1] != self.num_classes:
-            raise ValueError(
-                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
-            )
-
-        # predictions: [N]
-        predictions = outputs.argmax(dim=1)
-        # is_correct: [N]
-        is_correct_mask = predictions == labels
-        # true_positive_labels: [K] -- where K is the number of true positives
-        true_positive_labels = labels[is_correct_mask]
-        # tp_counts (true positives): [C] -- since we set minlength=C
-        tp_counts = torch.bincount(true_positive_labels, minlength=self.num_classes)
-        # pp_counts (predicted positives): [C] -- since we set minlength=C
-        pp_counts = torch.bincount(predictions, minlength=self.num_classes)
-
-        self.true_positives += tp_counts
-        self.predicted_positives += pp_counts
-
-    def on_epoch_complete(self, epoch_idx: int):
-        # precisions: [C]
-        precisions = torch.zeros(self.num_classes, dtype=torch.float)
-
-        # Create a mask for classes with predicted positives
-        # Need a mask to avoid division by zero
-        # has_pp_mask: [C]
-        has_pp_mask = self.predicted_positives > 0
-
-        # Calculate precision only for classes where pp > 0
-        precisions[has_pp_mask] = (
-            self.true_positives[has_pp_mask].float()
-            / self.predicted_positives[has_pp_mask].float()
-        )
-
-        # Compute last and mean precision (macro average)
-        self.class_precisions = precisions
-        self.epoch_precisions.append(precisions.mean().item())
-
-        # Reset counts for the next epoch
-        self.true_positives.zero_()
-        self.predicted_positives.zero_()
-
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.plot(self.epoch_precisions, label=label)
-
-    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.set_xlabel("Country")
+    def plot_class_precisions(self, ax: matplotlib.axes.Axes, label: str):
+        ax.plot(self.class_precisions, marker="o", label=label)
+        ax.set_xlabel("Class")
         ax.set_ylabel("Precision")
-        ax.set_xticks(torch.arange(self.num_classes))
-        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
-        ax.plot(self.class_precisions, label=label)
+        ax.set_xticks(range(len(self.classes)))
+        ax.set_xticklabels(self.classes, rotation=45, ha="right")
         ax.legend()
 
-
-class RecallMetric(Metric):
-    def __init__(self, classes: list[str]):
-        """
-        Corrects / Labels (predictions == labels / labels)
-
-        batch_size: N
-        num_classes: C
-        """
-        super().__init__()
-        self.classes = classes
-        self.num_classes = len(classes)
-        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.actual_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.epoch_recalls = []
-        self.class_recalls = torch.zeros(self.num_classes, dtype=torch.float)
-
-    def update(
-        self,
-        outputs: torch.Tensor,
-        labels: torch.Tensor,
-    ):
-        """
-        outputs: [N, C]
-        labels: [N]
-        """
-        if outputs.shape[0] != labels.shape[0]:
-            raise ValueError(
-                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
-            )
-
-        if outputs.shape[1] != self.num_classes:
-            raise ValueError(
-                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
-            )
-
-        # predictions: [N]
-        predictions = outputs.argmax(dim=1)
-        # is_correct: [N]
-        is_correct_mask = predictions == labels
-        # true_positive_labels: [K] -- where K is the number of true positives
-        true_positive_labels = labels[is_correct_mask]
-
-        # tp_counts (true positives): [C]
-        tp_counts = torch.bincount(true_positive_labels, minlength=self.num_classes)
-        # ap_counts (actual positives): [C]
-        ap_counts = torch.bincount(labels, minlength=self.num_classes)
-
-        self.true_positives += tp_counts
-        self.actual_positives += ap_counts
-
-    def on_epoch_complete(self, epoch_idx: int):
-        # recalls: [C]
-        recalls = torch.zeros(self.num_classes, dtype=torch.float)
-
-        # Create a mask for classes with actual positives
-        # Need a mask to avoid division by zero
-        # has_ap_mask: [C]
-        has_ap_mask = self.actual_positives > 0
-
-        # Calculate recall only for classes where cp > 0
-        recalls[has_ap_mask] = (
-            self.true_positives[has_ap_mask].float()
-            / self.actual_positives[has_ap_mask].float()
-        )
-
-        # Compute last and mean recall (macro average)
-        self.class_recalls = recalls
-        self.epoch_recalls.append(recalls.mean().item())
-
-        # Reset counts for the next epoch
-        self.true_positives.zero_()
-        self.actual_positives.zero_()
-
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.plot(self.epoch_recalls, label=label)
-
-    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.set_xlabel("Country")
+    def plot_class_recalls(self, ax: matplotlib.axes.Axes, label: str):
+        ax.plot(self.class_recalls, marker="o", label=label)
+        ax.set_xlabel("Class")
         ax.set_ylabel("Recall")
-        ax.set_xticks(torch.arange(len(self.classes)))
-        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
-        ax.plot(self.class_recalls, label=label)
+        ax.set_xticks(range(len(self.classes)))
+        ax.set_xticklabels(self.classes, rotation=45, ha="right")
         ax.legend()
 
-
-class F1ScoreMetric(Metric):
-    def __init__(self, classes: list[str]):
-        """
-        Calculates the macro-averaged F1 score.
-
-        num_classes: C
-        """
-        super().__init__()
-        self.classes = classes
-        self.num_classes = len(classes)
-        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.predicted_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.actual_positives = torch.zeros(self.num_classes, dtype=torch.int64)
-        self.epoch_f1_scores = []
-        self.class_f1_scores = torch.zeros(self.num_classes, dtype=torch.float)
-
-    def update(
-        self,
-        outputs: torch.Tensor,
-        labels: torch.Tensor,
-    ):
-        """
-        outputs: [N, C]
-        labels: [N]
-        """
-        if outputs.shape[0] != labels.shape[0]:
-            raise ValueError(
-                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
-            )
-
-        if outputs.shape[1] != self.num_classes:
-            raise ValueError(
-                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
-            )
-
-        # predictions: [N]
-        predictions = outputs.argmax(dim=1)
-        # is_correct: [N]
-        is_correct_mask = predictions == labels
-        # true_positive_labels: [K] -- where K is the number of true positives
-        true_positive_labels = labels[is_correct_mask]
-
-        # tp_counts (true positives): [C]
-        tp_counts = torch.bincount(true_positive_labels, minlength=self.num_classes)
-        # pp_counts (predicted positives): [C]
-        pp_counts = torch.bincount(predictions, minlength=self.num_classes)
-        # ap_counts (actual positives): [C]
-        ap_counts = torch.bincount(labels, minlength=self.num_classes)
-
-        self.true_positives += tp_counts
-        self.predicted_positives += pp_counts
-        self.actual_positives += ap_counts
-
-    def on_epoch_complete(self, epoch_idx: int):
-        # precisions: [C]
-        precisions = torch.zeros(self.num_classes, dtype=torch.float)
-        # recalls: [C]
-        recalls = torch.zeros(self.num_classes, dtype=torch.float)
-
-        # Calculate precision
-        has_pp_mask = self.predicted_positives > 0
-        precisions[has_pp_mask] = (
-            self.true_positives[has_pp_mask].float()
-            / self.predicted_positives[has_pp_mask].float()
-        )
-
-        # Calculate recall
-        has_ap_mask = self.actual_positives > 0
-        recalls[has_ap_mask] = (
-            self.true_positives[has_ap_mask].float()
-            / self.actual_positives[has_ap_mask].float()
-        )
-
-        sum_precisions_recalls = precisions + recalls
-        product_precisions_recalls = precisions * recalls
-        has_f1_mask = sum_precisions_recalls > 0
-
-        f1_scores = torch.zeros(self.num_classes, dtype=torch.float)
-        f1_scores[has_f1_mask] = (
-            2
-            * product_precisions_recalls[has_f1_mask]
-            / sum_precisions_recalls[has_f1_mask]
-        )
-
-        # Compute mean F1 score (macro average)
-        self.class_f1_scores = f1_scores
-        self.epoch_f1_scores.append(f1_scores.mean().item())
-
-        # Reset counts for the next epoch
-        self.true_positives.zero_()
-        self.predicted_positives.zero_()
-        self.actual_positives.zero_()
-
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.plot(self.epoch_f1_scores, label=label)
-
-    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        ax.set_xlabel("Country")
+    def plot_class_f1_scores(self, ax: matplotlib.axes.Axes, label: str):
+        ax.plot(self.class_f1_scores, marker="o", label=label)
+        ax.set_xlabel("Class")
         ax.set_ylabel("F1 Score")
-        ax.set_xticks(torch.arange(len(self.classes)))
-        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
-        ax.plot(self.class_f1_scores, label=label)
+        ax.set_xticks(range(len(self.classes)))
+        ax.set_xticklabels(self.classes, rotation=45, ha="right")
         ax.legend()
