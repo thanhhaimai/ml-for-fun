@@ -12,20 +12,15 @@ class Metric:
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
         labels: [N]
-        batch_loss: [1]
         """
         raise NotImplementedError
 
     def on_epoch_complete(self, epoch_idx: int):
         pass
-
-    def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
-        raise NotImplementedError
 
 
 class AccuracyMetric(Metric):
@@ -43,7 +38,6 @@ class AccuracyMetric(Metric):
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
@@ -74,20 +68,24 @@ class AccuracyMetric(Metric):
 
 
 class ConfusionMatrixMetric(Metric):
-    def __init__(self, num_classes: int, normalize: bool):
+    def __init__(self, classes: list[str], normalize: bool):
         """
         num_classes: C
         """
         super().__init__()
-        self.num_classes = num_classes
-        self.confusion_matrix = torch.zeros(num_classes, num_classes, dtype=torch.int64)
+        self.classes = classes
+        self.num_classes = len(classes)
+        self.confusion_matrix = torch.zeros(
+            self.num_classes,
+            self.num_classes,
+            dtype=torch.int64,
+        )
         self.normalize = normalize
 
     def update(
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
@@ -131,10 +129,12 @@ class ConfusionMatrixMetric(Metric):
         ax.set_title("Confusion Matrix")
         ax.set_xlabel("Predicted")
         ax.set_ylabel("Label")
+        ax.set_xticklabels(self.classes, rotation=90)
+        ax.set_yticklabels(self.classes, rotation=0)
 
 
 class PrecisionMetric(Metric):
-    def __init__(self, num_classes: int):
+    def __init__(self, classes: list[str]):
         """
         Corrects / Predicteds (predictions == labels) / predictions
 
@@ -142,16 +142,17 @@ class PrecisionMetric(Metric):
         num_classes: C
         """
         super().__init__()
-        self.num_classes = num_classes
-        self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
-        self.predicted_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.classes = classes
+        self.num_classes = len(classes)
+        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
+        self.predicted_positives = torch.zeros(self.num_classes, dtype=torch.int64)
         self.epoch_precisions = []
+        self.class_precisions = torch.zeros(self.num_classes, dtype=torch.float)
 
     def update(
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
@@ -196,9 +197,9 @@ class PrecisionMetric(Metric):
             / self.predicted_positives[has_pp_mask].float()
         )
 
-        # Compute mean precision (macro average)
-        mean_precision = precisions.mean().item()
-        self.epoch_precisions.append(mean_precision)
+        # Compute last and mean precision (macro average)
+        self.class_precisions = precisions
+        self.epoch_precisions.append(precisions.mean().item())
 
         # Reset counts for the next epoch
         self.true_positives.zero_()
@@ -207,9 +208,17 @@ class PrecisionMetric(Metric):
     def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
         ax.plot(self.epoch_precisions, label=label)
 
+    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.set_xlabel("Country")
+        ax.set_ylabel("Precision")
+        ax.set_xticks(torch.arange(self.num_classes))
+        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
+        ax.plot(self.class_precisions, label=label)
+        ax.legend()
+
 
 class RecallMetric(Metric):
-    def __init__(self, num_classes: int):
+    def __init__(self, classes: list[str]):
         """
         Corrects / Labels (predictions == labels / labels)
 
@@ -217,16 +226,17 @@ class RecallMetric(Metric):
         num_classes: C
         """
         super().__init__()
-        self.num_classes = num_classes
-        self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
-        self.actual_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.classes = classes
+        self.num_classes = len(classes)
+        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
+        self.actual_positives = torch.zeros(self.num_classes, dtype=torch.int64)
         self.epoch_recalls = []
+        self.class_recalls = torch.zeros(self.num_classes, dtype=torch.float)
 
     def update(
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
@@ -272,9 +282,9 @@ class RecallMetric(Metric):
             / self.actual_positives[has_ap_mask].float()
         )
 
-        # Compute mean recall (macro average)
-        mean_recall = recalls.mean().item()
-        self.epoch_recalls.append(mean_recall)
+        # Compute last and mean recall (macro average)
+        self.class_recalls = recalls
+        self.epoch_recalls.append(recalls.mean().item())
 
         # Reset counts for the next epoch
         self.true_positives.zero_()
@@ -283,26 +293,35 @@ class RecallMetric(Metric):
     def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
         ax.plot(self.epoch_recalls, label=label)
 
+    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.set_xlabel("Country")
+        ax.set_ylabel("Recall")
+        ax.set_xticks(torch.arange(len(self.classes)))
+        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
+        ax.plot(self.class_recalls, label=label)
+        ax.legend()
+
 
 class F1ScoreMetric(Metric):
-    def __init__(self, num_classes: int):
+    def __init__(self, classes: list[str]):
         """
         Calculates the macro-averaged F1 score.
 
         num_classes: C
         """
         super().__init__()
-        self.num_classes = num_classes
-        self.true_positives = torch.zeros(num_classes, dtype=torch.int64)
-        self.predicted_positives = torch.zeros(num_classes, dtype=torch.int64)
-        self.actual_positives = torch.zeros(num_classes, dtype=torch.int64)
+        self.classes = classes
+        self.num_classes = len(classes)
+        self.true_positives = torch.zeros(self.num_classes, dtype=torch.int64)
+        self.predicted_positives = torch.zeros(self.num_classes, dtype=torch.int64)
+        self.actual_positives = torch.zeros(self.num_classes, dtype=torch.int64)
         self.epoch_f1_scores = []
+        self.class_f1_scores = torch.zeros(self.num_classes, dtype=torch.float)
 
     def update(
         self,
         outputs: torch.Tensor,
         labels: torch.Tensor,
-        batch_loss: torch.Tensor,
     ):
         """
         outputs: [N, C]
@@ -368,8 +387,8 @@ class F1ScoreMetric(Metric):
         )
 
         # Compute mean F1 score (macro average)
-        mean_f1_score = f1_scores.mean().item()
-        self.epoch_f1_scores.append(mean_f1_score)
+        self.class_f1_scores = f1_scores
+        self.epoch_f1_scores.append(f1_scores.mean().item())
 
         # Reset counts for the next epoch
         self.true_positives.zero_()
@@ -378,3 +397,11 @@ class F1ScoreMetric(Metric):
 
     def plot(self, ax: matplotlib.axes.Axes, label: str | None = None):
         ax.plot(self.epoch_f1_scores, label=label)
+
+    def plot_classes(self, ax: matplotlib.axes.Axes, label: str | None = None):
+        ax.set_xlabel("Country")
+        ax.set_ylabel("F1 Score")
+        ax.set_xticks(torch.arange(len(self.classes)))
+        ax.set_xticklabels(self.classes, rotation=90, fontsize=8)
+        ax.plot(self.class_f1_scores, label=label)
+        ax.legend()

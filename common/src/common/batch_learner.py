@@ -1,4 +1,6 @@
 import math
+import time
+from dataclasses import dataclass
 
 import torch
 from torch import nn, optim
@@ -7,7 +9,13 @@ from torch.utils.data import DataLoader
 from common.metrics import Metric
 
 
-class Learner:
+@dataclass
+class Batch:
+    inputs: list[torch.Tensor]
+    labels: list[torch.Tensor]
+
+
+class BatchLearner:
     def __init__(
         self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
     ):
@@ -15,58 +23,54 @@ class Learner:
         self.optimizer = optimizer
         self.criterion = criterion
 
-    def train(self, train_loader: DataLoader, train_metrics: list[Metric]) -> float:
+    def step(self, dataloader: DataLoader, metrics: list[Metric], train: bool) -> float:
+        epoch_loss = 0
+        batch: Batch
+        for i, batch in enumerate(dataloader):
+            outputs = []
+
+            batch_loss = torch.tensor(0.0)
+            for input, label in zip(batch.inputs, batch.labels):
+                outputs.append(self.model(input))
+                loss = self.criterion(outputs[-1], label)
+                batch_loss += loss
+
+            if train:
+                self.optimizer.zero_grad()
+                batch_loss.backward()
+                self.optimizer.step()
+
+            for metric in metrics:
+                outputs_tensor = torch.cat(outputs, dim=0)
+                labels_tensor = torch.cat(batch.labels, dim=0)
+                metric.update(outputs_tensor, labels_tensor)
+
+            epoch_loss += batch_loss.item() / len(batch.labels)
+
+        return epoch_loss / len(dataloader)
+
+    def train(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.train()
-        epoch_loss = 0
-        for inputs, labels in train_loader:
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, labels)
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        return self.step(dataloader, metrics, train=True)
 
-            epoch_loss += loss.item()
-
-            for metric in train_metrics:
-                metric.update(outputs, labels)
-
-        return epoch_loss / len(train_loader)
-
-    def eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
+    def eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.eval()
-        epoch_loss = 0
         with torch.no_grad():
-            for inputs, labels in eval_loader:
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
-                epoch_loss += loss.item()
+            return self.step(dataloader, metrics, train=False)
 
-                for metric in eval_metrics:
-                    metric.update(outputs, labels)
-
-        return epoch_loss / len(eval_loader)
-
-    def final_eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
+    def final_eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.eval()
-        epoch_loss = 0
         with torch.no_grad():
-            for inputs, labels in eval_loader:
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
-                epoch_loss += loss.item()
-
-                for metric in eval_metrics:
-                    metric.update(outputs, labels)
-
-            for metric in eval_metrics:
+            epoch_loss = self.step(dataloader, metrics, train=False)
+            for metric in metrics:
                 metric.on_epoch_complete(0)
 
-        return epoch_loss / len(eval_loader)
+        return epoch_loss
 
     def fit(
         self,
-        train_loader: DataLoader,
-        eval_loader: DataLoader,
+        train_dataloader: DataLoader,
+        eval_dataloader: DataLoader,
         num_epochs: int,
         patience: int | None,
         train_metrics: list[Metric],
@@ -77,8 +81,9 @@ class Learner:
         eval_losses = []
         current_patience = 0
         for epoch in range(num_epochs):
-            train_loss = self.train(train_loader, train_metrics)
-            eval_loss = self.eval(eval_loader, eval_metrics)
+            start_time = time.time()
+            train_loss = self.train(train_dataloader, train_metrics)
+            eval_loss = self.eval(eval_dataloader, eval_metrics)
 
             for metric in train_metrics:
                 metric.on_epoch_complete(epoch)
@@ -86,8 +91,11 @@ class Learner:
             for metric in eval_metrics:
                 metric.on_epoch_complete(epoch)
 
+            elapsed_time = time.time() - start_time
             print(
-                f"{epoch}/{num_epochs} \tTrain loss \t{train_loss:.4f} \tEval loss \t{eval_loss:.4f}"
+                f"{epoch}/{num_epochs} -- {elapsed_time:.2f}s "
+                f"\tTrain loss \t{train_loss:.4f} "
+                f"\tEval loss \t{eval_loss:.4f}"
             )
 
             train_losses.append(train_loss)
@@ -113,7 +121,7 @@ class Learner:
         seq_length: S
         input_size: D
 
-        input: [S, D]
+        input: [S, 1, D]
         """
         _, idx = self.predict_topk(input, k=1)
         return int(idx.item())
@@ -125,15 +133,12 @@ class Learner:
         seq_length: S
         input_size: D
 
-        input: [S, D]
+        input: [S, 1, D]
 
         returns:
             likelihoods: [K]
             indices: [K]
         """
-        # Add a batch dimension to the input
-        # input: [S, D] -> [S, 1, D]
-        input = input.unsqueeze(1)
         self.model.eval()
         with torch.no_grad():
             # output: [1, C]
