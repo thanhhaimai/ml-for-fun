@@ -9,15 +9,6 @@ from learning.learner import BatchResult, Learner
 from learning.names_classifier.names_classifier_dataset import NameSample
 
 
-@dataclass
-class Batch:
-    samples: list[NameSample]
-
-    @classmethod
-    def from_samples(cls, batch: list[NameSample]) -> Self:
-        return cls(samples=batch)
-
-
 class NamesClassifierRNN(nn.Module):
     """
     D: input_size
@@ -96,6 +87,15 @@ class NamesClassifierLSTM(nn.Module):
         # output: [N, C]
         output = self.fc(dropout_output)
         return output
+
+
+@dataclass
+class Batch:
+    samples: list[NameSample]
+
+    @classmethod
+    def from_samples(cls, batch: list[NameSample]) -> Self:
+        return cls(samples=batch)
 
 
 class SequentialBatchLearner(Learner[Batch]):
