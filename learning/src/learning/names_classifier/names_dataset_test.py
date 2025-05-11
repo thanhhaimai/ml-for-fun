@@ -4,7 +4,9 @@ import pytest
 import torch
 
 from data.names_data_source import NamesDataSource, unicode_to_ascii
-from data.names_dataset import NameSample, NamesDataset
+from learning.names_classifier.names_dataset import NameSample, NamesDataset
+
+DATA_ROOT = os.path.join(os.path.dirname(__file__), "../../../../datasets")
 
 
 def make_data_source(test_dir, **kwargs):
@@ -22,7 +24,7 @@ def test_dir(tmp_path):
 
 @pytest.fixture
 def real_data_dir():
-    return os.path.join(os.path.dirname(__file__), "../../../datasets/names")
+    return os.path.join(DATA_ROOT, "names")
 
 
 def test_names_data_source_load(test_dir):
