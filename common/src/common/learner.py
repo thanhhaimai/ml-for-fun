@@ -1,10 +1,18 @@
 import math
+from abc import abstractmethod
+from dataclasses import dataclass
 
 import torch
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
 from common.metrics import Metric
+
+
+@dataclass
+class Batch:
+    inputs: torch.Tensor
+    labels: torch.Tensor
 
 
 class Learner:
@@ -15,58 +23,56 @@ class Learner:
         self.optimizer = optimizer
         self.criterion = criterion
 
-    def train(self, train_loader: DataLoader, train_metrics: list[Metric]) -> float:
+    @abstractmethod
+    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor]:
+        pass
+
+    @abstractmethod
+    def collate_batch(self, batch) -> Batch:
+        pass
+
+    def epoch_step(
+        self, dataloader: DataLoader, metrics: list[Metric], train: bool
+    ) -> float:
+        epoch_loss = 0
+        batch: Batch
+        for batch in dataloader:
+            outputs, batch_loss = self.batch_step(batch)
+
+            if train:
+                self.optimizer.zero_grad()
+                batch_loss.backward()
+                self.optimizer.step()
+
+            for metric in metrics:
+                metric.update(outputs, batch.labels)
+
+            epoch_loss += batch_loss.item() / len(batch.labels)
+
+        return epoch_loss / len(dataloader)
+
+    def train(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.train()
-        epoch_loss = 0
-        for inputs, labels in train_loader:
-            outputs = self.model(inputs)
-            loss = self.criterion(outputs, labels)
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
+        return self.epoch_step(dataloader, metrics, train=True)
 
-            epoch_loss += loss.item()
-
-            for metric in train_metrics:
-                metric.update(outputs, labels)
-
-        return epoch_loss / len(train_loader)
-
-    def eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
+    def eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.eval()
-        epoch_loss = 0
         with torch.no_grad():
-            for inputs, labels in eval_loader:
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
-                epoch_loss += loss.item()
+            return self.epoch_step(dataloader, metrics, train=False)
 
-                for metric in eval_metrics:
-                    metric.update(outputs, labels)
-
-        return epoch_loss / len(eval_loader)
-
-    def final_eval(self, eval_loader: DataLoader, eval_metrics: list[Metric]) -> float:
+    def final_eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.eval()
-        epoch_loss = 0
         with torch.no_grad():
-            for inputs, labels in eval_loader:
-                outputs = self.model(inputs)
-                loss = self.criterion(outputs, labels)
-                epoch_loss += loss.item()
-
-                for metric in eval_metrics:
-                    metric.update(outputs, labels)
-
-            for metric in eval_metrics:
+            epoch_loss = self.epoch_step(dataloader, metrics, train=False)
+            for metric in metrics:
                 metric.on_epoch_complete(0)
 
-        return epoch_loss / len(eval_loader)
+        return epoch_loss
 
     def fit(
         self,
-        train_loader: DataLoader,
-        eval_loader: DataLoader,
+        train_dataloader: DataLoader,
+        eval_dataloader: DataLoader,
         num_epochs: int,
         patience: int | None,
         train_metrics: list[Metric],
@@ -77,8 +83,8 @@ class Learner:
         eval_losses = []
         current_patience = 0
         for epoch in range(num_epochs):
-            train_loss = self.train(train_loader, train_metrics)
-            eval_loss = self.eval(eval_loader, eval_metrics)
+            train_loss = self.train(train_dataloader, train_metrics)
+            eval_loss = self.eval(eval_dataloader, eval_metrics)
 
             for metric in train_metrics:
                 metric.on_epoch_complete(epoch)
