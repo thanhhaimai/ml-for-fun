@@ -99,7 +99,7 @@ class SequentialBatchLearner(Learner[Batch]):
         # outputs: [S, C]
         outputs_tensor = torch.cat(outputs, dim=0)
 
-        # labels: [S]
+        # labels: [S, 1]
         labels_tensor = torch.cat(labels, dim=0)
 
         return BatchResult(
@@ -119,7 +119,7 @@ class ParallelBatchLearner(Learner):
     def batch_step(self, batch: Batch) -> BatchResult:
         # shape: [N, S, V]
         inputs = pad_sequence([sample.input for sample in batch.samples])
-        # shape: [N, S]
+        # shape: [N, S, 1]
         labels = pad_sequence([sample.label for sample in batch.samples])
         # shape: [N, S, C]
         categories = pad_sequence([sample.category for sample in batch.samples])

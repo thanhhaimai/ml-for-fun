@@ -21,12 +21,11 @@ class NameSample:
     input: torch.Tensor
 
     # For each character in the input, the label is the index of the next character
-    # shape: [S]
+    # shape: [S, 1]
     label: torch.Tensor
 
     # The whole sequence is from the same country, encoded as a one-hot vector
-    # Technically, this should be [1, C], but we expand it to [S, C] for convenience
-    # shape: [S, C]
+    # shape: [1, C]
     category: torch.Tensor
 
 
@@ -53,16 +52,14 @@ class NamesGeneratorDataset(Dataset[NameSample]):
 
                 # shape: [S, V]
                 input = name_one_hot[:-1]
-                # shape: [S]
+                # shape: [S, 1]
                 label = torch.tensor(
                     [self.names_data_source.t2i(c) for c in name[1:]], dtype=torch.long
-                ).squeeze(1)
-                # shape: [1, C]
-                country_one_hot = names_data_source.country_index_to_one_hot(
-                    country_idx
                 )
-                # shape: [S, C]
-                category = country_one_hot.expand(input.shape[0], -1)
+                # shape: [1, C]
+                category = names_data_source.country_index_to_one_hot(
+                    country_idx
+                ).unsqueeze(0)
 
                 self.samples.append(
                     NameSample(
