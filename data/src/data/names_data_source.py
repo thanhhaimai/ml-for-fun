@@ -3,6 +3,9 @@ import unicodedata
 from collections import defaultdict
 from typing import Self
 
+import torch
+import torch.nn.functional as F
+
 START_TOKEN = "."
 END_TOKEN = "~"
 
@@ -87,3 +90,32 @@ class NamesDataSource:
 
     def i2t(self, indices: list[int]) -> str:
         return "".join(self.index_to_token[i] for i in indices)
+
+    def name_to_one_hot(self, name: str) -> torch.Tensor:
+        """
+        return: shape [S, 1, V]
+        """
+        return (
+            F.one_hot(
+                torch.tensor(self.t2i(name)),
+                num_classes=self.num_vocab,
+            )
+            .float()
+            .unsqueeze(1)
+        )
+
+    def one_hot_to_name(self, one_hot: torch.Tensor) -> str:
+        """
+        one_hot: shape [S, V]
+        """
+        indices = one_hot.argmax(dim=1)
+        return self.i2t(indices.tolist())
+
+    def country_index_to_one_hot(self, country_idx: int) -> torch.Tensor:
+        """
+        return: shape [num_classes]
+        """
+        return F.one_hot(
+            torch.tensor(country_idx),
+            num_classes=self.num_classes,
+        ).float()

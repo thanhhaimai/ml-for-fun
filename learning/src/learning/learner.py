@@ -1,6 +1,7 @@
 import math
 import time
 from abc import abstractmethod
+from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import torch
@@ -8,6 +9,15 @@ from torch import nn, optim
 from torch.utils.data import DataLoader
 
 from learning.metrics import Metric
+
+
+@dataclass
+class BatchResult:
+    outputs: torch.Tensor
+    labels: torch.Tensor
+    loss: torch.Tensor
+    loss_scale: int
+
 
 BatchT = TypeVar("BatchT")
 
@@ -21,7 +31,7 @@ class Learner(Generic[BatchT]):
         self.criterion = criterion
 
     @abstractmethod
-    def batch_step(self, batch: BatchT) -> tuple[torch.Tensor, torch.Tensor, int]:
+    def batch_step(self, batch: BatchT) -> BatchResult:
         pass
 
     def epoch_step(
@@ -29,17 +39,17 @@ class Learner(Generic[BatchT]):
     ) -> float:
         epoch_loss = 0
         for batch in dataloader:
-            outputs, batch_loss, loss_scale = self.batch_step(batch)
+            batch_result = self.batch_step(batch)
 
             if train:
                 self.optimizer.zero_grad()
-                batch_loss.backward()
+                batch_result.loss.backward()
                 self.optimizer.step()
 
             for metric in metrics:
-                metric.update(outputs, batch.labels)
+                metric.update(batch_result.outputs, batch_result.labels)
 
-            epoch_loss += batch_loss.item() / loss_scale
+            epoch_loss += batch_result.loss.item() / batch_result.loss_scale
 
         return epoch_loss / len(dataloader)
 

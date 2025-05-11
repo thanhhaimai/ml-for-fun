@@ -4,7 +4,10 @@ import pytest
 import torch
 
 from data.names_data_source import NamesDataSource, unicode_to_ascii
-from learning.names_classifier.names_dataset import NameSample, NamesDataset
+from learning.names_classifier.names_classifier_dataset import (
+    NameSample,
+    NamesClassifierDataset,
+)
 
 DATA_ROOT = os.path.join(os.path.dirname(__file__), "../../../../datasets")
 
@@ -61,42 +64,18 @@ def test_names_data_source_t2i_i2t(test_dir):
 
 def test_names_dataset_basic(test_dir):
     ds = NamesDataSource.load(str(test_dir))
-    dataset = NamesDataset(ds)
+    dataset = NamesClassifierDataset(ds)
     assert len(dataset) == 4
     sample = dataset[0]
     assert isinstance(sample, NameSample)
-    assert sample.name in ["John", "Jane", "Jean", "Marie"]
-    assert sample.country in ["English", "French"]
     assert sample.label.shape == (1,)
     assert sample.input.shape[1] == 1
     assert sample.input.shape[2] == ds.num_vocab
 
 
-def test_names_dataset_name_to_one_hot_and_back(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
-    dataset = NamesDataset(ds)
-    name = "John"
-    one_hot = dataset.name_to_one_hot(name)
-    assert one_hot.shape[0] == len(name)
-    assert one_hot.shape[2] == ds.num_vocab
-    # Remove batch dim for one_hot_to_name
-    recovered = dataset.one_hot_to_name(one_hot.squeeze(1))
-    assert recovered == name
-
-
-def test_names_dataset_country_index_to_one_hot(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
-    dataset = NamesDataset(ds)
-    for idx in range(ds.num_classes):
-        one_hot = dataset.country_index_to_one_hot(idx)
-        assert one_hot.shape[0] == ds.num_classes
-        assert one_hot[idx] == 1.0
-        assert one_hot.sum() == 1.0
-
-
 def test_names_dataset_out_of_range(test_dir):
     ds = NamesDataSource.load(str(test_dir))
-    dataset = NamesDataset(ds)
+    dataset = NamesClassifierDataset(ds)
     with pytest.raises(IndexError):
         _ = dataset[100]
 
@@ -111,12 +90,10 @@ def test_names_data_source_real_data(real_data_dir):
 
 def test_names_dataset_real_data(real_data_dir):
     ds = NamesDataSource.load(real_data_dir)
-    dataset = NamesDataset(ds)
+    dataset = NamesClassifierDataset(ds)
     assert len(dataset) > 0
     sample = dataset[0]
     assert isinstance(sample, NameSample)
-    assert isinstance(sample.name, str)
-    assert isinstance(sample.country, str)
     assert isinstance(sample.label, torch.Tensor)
     assert isinstance(sample.input, torch.Tensor)
 

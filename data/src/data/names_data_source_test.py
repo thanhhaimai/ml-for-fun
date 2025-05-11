@@ -84,3 +84,23 @@ def test_real_data(real_data_dir):
         for name in names:
             assert isinstance(name, str)
             assert name
+
+
+def test_name_to_one_hot_and_back(test_dir):
+    ds = NamesDataSource.load(str(test_dir))
+    name = "John"
+    one_hot = ds.name_to_one_hot(name)
+    assert one_hot.shape[0] == len(name)
+    assert one_hot.shape[2] == ds.num_vocab
+    # Remove batch dim for one_hot_to_name
+    recovered = ds.one_hot_to_name(one_hot.squeeze(1))
+    assert recovered == name
+
+
+def test_country_index_to_one_hot(test_dir):
+    ds = NamesDataSource.load(str(test_dir))
+    for idx in range(ds.num_classes):
+        one_hot = ds.country_index_to_one_hot(idx)
+        assert one_hot.shape[0] == ds.num_classes
+        assert one_hot[idx] == 1.0
+        assert one_hot.sum() == 1.0
