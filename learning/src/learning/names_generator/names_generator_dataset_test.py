@@ -79,7 +79,7 @@ def test_names_dataset_basic(test_dir):
     # There are 9 tokens, and 2 extra tokens for the start and end tokens
     assert sample.category.shape == (5, 2)
     assert sample.input.shape == (5, 11)
-    assert sample.label.shape == (5, 11)
+    assert sample.label.shape == (5,)
 
 
 def test_names_dataset_out_of_range(test_dir):

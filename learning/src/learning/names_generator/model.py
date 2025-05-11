@@ -5,7 +5,7 @@ import torch
 from torch import nn, optim
 from torch.nn.utils.rnn import pad_sequence
 
-from learning.learner import Learner
+from learning.learner import BatchResult, Learner
 from learning.names_generator.names_generator_dataset import NameSample
 
 
@@ -64,25 +64,11 @@ class NamesGenerator(nn.Module):
 
 @dataclass
 class Batch:
-    # list[torch.Tensor] -- list of [S, C]
-    categories: list[torch.Tensor]
-    # list[torch.Tensor] -- list of [S, V]
-    inputs: list[torch.Tensor]
-    # shape: [N, S, V] -- label must be in tensor form
-    labels: torch.Tensor
+    samples: list[NameSample]
 
     @classmethod
     def from_samples(cls, batch: list[NameSample]) -> Self:
-        categories = []
-        inputs = []
-        labels = []
-        for sample in batch:
-            categories.append(sample.category)
-            inputs.append(sample.input)
-            labels.append(sample.label)
-
-        labels_tensor = torch.cat(labels)
-        return cls(categories=categories, inputs=inputs, labels=labels_tensor)
+        return cls(samples=batch)
 
 
 class SequentialBatchLearner(Learner[Batch]):
@@ -91,22 +77,37 @@ class SequentialBatchLearner(Learner[Batch]):
     ):
         super().__init__(model, optimizer, criterion)
 
-    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor, int]:
+    def batch_step(self, batch: Batch) -> BatchResult:
         outputs: list[torch.Tensor] = []
+        labels: list[torch.Tensor] = []
         batch_loss = torch.tensor(0.0)
 
-        # batch.inputs: list[torch.Tensor] -- list of [S, D]
-        # batch.labels: [N, S, V]
-        for input, label in zip(batch.inputs, batch.labels):
-            # output: [1, C]
-            output = self.model(input)
-            outputs.append(output)
-            batch_loss += self.criterion(output, label.unsqueeze(0))
+        # Declare that the model is a NamesGenerator
+        self.model: NamesGenerator
 
-        # outputs: [N, C]
+        for sample in batch.samples:
+            # For every sample, we need to initialize the hidden state from scratch
+            # shape: [1, H]
+            hidden = self.model.init_hidden()
+
+            # output: [1, C]
+            output, hidden = self.model(sample.category, sample.input, hidden)
+            outputs.append(output)
+            labels.append(sample.label)
+            batch_loss += self.criterion(output, sample.label)
+
+        # outputs: [S, C]
         outputs_tensor = torch.cat(outputs, dim=0)
 
-        return outputs_tensor, batch_loss, len(batch.inputs)
+        # labels: [S]
+        labels_tensor = torch.cat(labels, dim=0)
+
+        return BatchResult(
+            outputs=outputs_tensor,
+            labels=labels_tensor,
+            loss=batch_loss,
+            loss_scale=len(batch.samples),
+        )
 
 
 class ParallelBatchLearner(Learner):
@@ -115,11 +116,21 @@ class ParallelBatchLearner(Learner):
     ):
         super().__init__(model, optimizer, criterion)
 
-    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor, int]:
-        # inputs: [S, N, D]
-        # batch.labels: [N]
-        inputs = pad_sequence(batch.inputs).squeeze(2)
-        # shape: [N, C]
-        outputs = self.model(inputs)
-        batch_loss = self.criterion(outputs, batch.labels)
-        return outputs, batch_loss, 1
+    def batch_step(self, batch: Batch) -> BatchResult:
+        # shape: [N, S, V]
+        inputs = pad_sequence([sample.input for sample in batch.samples])
+        # shape: [N, S]
+        labels = pad_sequence([sample.label for sample in batch.samples])
+        # shape: [N, S, C]
+        categories = pad_sequence([sample.category for sample in batch.samples])
+
+        # shape: [N, S, C]
+        outputs = self.model(categories, inputs)
+        batch_loss = self.criterion(outputs, labels)
+
+        return BatchResult(
+            outputs=outputs,
+            labels=labels,
+            loss=batch_loss,
+            loss_scale=1,
+        )
