@@ -15,4 +15,4 @@ dependencies = [
 
 [tool.uv.sources]
 data = { workspace = true }
-common = { workspace = true }
+learning = { workspace = true }

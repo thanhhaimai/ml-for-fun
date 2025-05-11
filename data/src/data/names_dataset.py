@@ -4,8 +4,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
-from common.learner import Sample
 from data.names_data_source import NamesDataSource
+from learning.learner import Sample
 
 
 @dataclass

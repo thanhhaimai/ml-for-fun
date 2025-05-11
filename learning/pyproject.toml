@@ -1,5 +1,5 @@
 [project]
-name = "common"
+name = "learning"
 version = "0.1.0"
 description = "Add your description here"
 classifiers = ["Private :: Do Not Upload"]

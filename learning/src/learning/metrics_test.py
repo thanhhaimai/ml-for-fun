@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-from common.metrics import ConfusionMatrixMetric
+from learning.metrics import ConfusionMatrixMetric
 
 
 def test_confusion_matrix_update_and_properties():
