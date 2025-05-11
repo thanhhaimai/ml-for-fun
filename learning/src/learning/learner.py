@@ -1,7 +1,7 @@
 import math
 import time
 from abc import abstractmethod
-from dataclasses import dataclass
+from typing import Generic, TypeVar
 
 import torch
 from torch import nn, optim
@@ -9,30 +9,10 @@ from torch.utils.data import DataLoader
 
 from learning.metrics import Metric
 
-
-@dataclass
-class Batch:
-    # list[torch.Tensor] -- [S, N, D]
-    inputs: list[torch.Tensor]
-    # shape: [N]
-    labels: torch.Tensor
+BatchT = TypeVar("BatchT")
 
 
-@dataclass
-class Sample:
-    """
-    S: sequence_length
-    V: num_vocab
-    C: num_classes
-    """
-
-    # shape: [S, V] -- one-hot encoded sequence
-    input: torch.Tensor
-    # shape: [1] -- class index
-    label: torch.Tensor
-
-
-class Learner:
+class Learner(Generic[BatchT]):
     def __init__(
         self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
     ):
@@ -41,18 +21,13 @@ class Learner:
         self.criterion = criterion
 
     @abstractmethod
-    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor, int]:
-        pass
-
-    @abstractmethod
-    def collate_batch(self, batch: list[Sample]) -> Batch:
+    def batch_step(self, batch: BatchT) -> tuple[torch.Tensor, torch.Tensor, int]:
         pass
 
     def epoch_step(
-        self, dataloader: DataLoader, metrics: list[Metric], train: bool
+        self, dataloader: DataLoader[BatchT], metrics: list[Metric], train: bool
     ) -> float:
         epoch_loss = 0
-        batch: Batch
         for batch in dataloader:
             outputs, batch_loss, loss_scale = self.batch_step(batch)
 

@@ -5,23 +5,27 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from data.names_data_source import NamesDataSource
-from learning.learner import Sample
 
 
 @dataclass
-class NameSample(Sample):
+class NameSample:
     """
     A single non-batched sample of name and country.
 
     S: sequence_length
-    V: num_vocab
+    C: num_classes
     """
+
+    # shape: [S, V] -- one-hot encoded sequence
+    input: torch.Tensor
+    # shape: [1] -- class index
+    label: torch.Tensor
 
     country: str
     name: str
 
 
-class NamesDataset(Dataset):
+class NamesDataset(Dataset[NameSample]):
     """
     S: sequence_length
     V: num_vocab
@@ -75,7 +79,7 @@ class NamesDataset(Dataset):
             num_classes=self.names_data_source.num_classes,
         ).float()
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.samples)
 
     def __getitem__(self, idx) -> NameSample:

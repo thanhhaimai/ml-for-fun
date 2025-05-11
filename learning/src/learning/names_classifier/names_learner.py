@@ -1,19 +1,30 @@
+from dataclasses import dataclass
+
 import torch
 from torch import nn, optim
 from torch.nn.utils.rnn import pad_sequence
 
-from common.learner import Batch, Learner, Sample
+from learning.learner import Learner
+from learning.names_classifier.names_dataset import NameSample
 
 
-class SequentialBatchLearner(Learner):
+@dataclass
+class Batch:
+    # list[torch.Tensor] -- [S, N, D]
+    inputs: list[torch.Tensor]
+    # shape: [N]
+    labels: torch.Tensor
+
+
+class SequentialBatchLearner(Learner[Batch]):
     def __init__(
         self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
     ):
         super().__init__(model, optimizer, criterion)
 
-    def collate_batch(self, batch: list[Sample]) -> Batch:
+    def collate_batch(self, batch: list[NameSample]) -> Batch:
         """
-        batch: list[Sample]
+        batch: list[NameSample]
         """
         inputs = []
         labels = []
@@ -50,9 +61,9 @@ class ParallelBatchLearner(Learner):
     ):
         super().__init__(model, optimizer, criterion)
 
-    def collate_batch(self, batch: list[Sample]) -> Batch:
+    def collate_batch(self, batch: list[NameSample]) -> Batch:
         """
-        batch: list[Sample]
+        batch: list[NameSample]
         """
         inputs = []
         labels = []
