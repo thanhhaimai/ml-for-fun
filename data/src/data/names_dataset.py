@@ -4,11 +4,12 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset
 
+from common.learner import Sample
 from data.names_data_source import NamesDataSource
 
 
 @dataclass
-class NameSample:
+class NameSample(Sample):
     """
     A single non-batched sample of name and country.
 
@@ -18,10 +19,6 @@ class NameSample:
 
     country: str
     name: str
-    # shape [1]
-    country_tensor: torch.Tensor
-    # shape [S, V]
-    name_tensor: torch.Tensor
 
 
 class NamesDataset(Dataset):
@@ -42,8 +39,8 @@ class NamesDataset(Dataset):
             for name in names:
                 self.samples.append(
                     NameSample(
-                        country_tensor=torch.tensor(country_idx).unsqueeze(0),
-                        name_tensor=self.name_to_one_hot(name),
+                        input=self.name_to_one_hot(name),
+                        label=torch.tensor(country_idx).unsqueeze(0),
                         country=names_data_source.countries[country_idx],
                         name=name,
                     )

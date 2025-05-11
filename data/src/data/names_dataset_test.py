@@ -65,9 +65,9 @@ def test_names_dataset_basic(test_dir):
     assert isinstance(sample, NameSample)
     assert sample.name in ["John", "Jane", "Jean", "Marie"]
     assert sample.country in ["English", "French"]
-    assert sample.country_tensor.shape == (1,)
-    assert sample.name_tensor.shape[1] == 1
-    assert sample.name_tensor.shape[2] == ds.num_vocab
+    assert sample.label.shape == (1,)
+    assert sample.input.shape[1] == 1
+    assert sample.input.shape[2] == ds.num_vocab
 
 
 def test_names_dataset_name_to_one_hot_and_back(test_dir):
@@ -115,8 +115,8 @@ def test_names_dataset_real_data(real_data_dir):
     assert isinstance(sample, NameSample)
     assert isinstance(sample.name, str)
     assert isinstance(sample.country, str)
-    assert isinstance(sample.country_tensor, torch.Tensor)
-    assert isinstance(sample.name_tensor, torch.Tensor)
+    assert isinstance(sample.label, torch.Tensor)
+    assert isinstance(sample.input, torch.Tensor)
 
 
 def test_names_data_source_empty_folder(tmp_path):

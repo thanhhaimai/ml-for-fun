@@ -1,4 +1,5 @@
 import math
+import time
 from abc import abstractmethod
 from dataclasses import dataclass
 
@@ -11,8 +12,24 @@ from common.metrics import Metric
 
 @dataclass
 class Batch:
-    inputs: torch.Tensor
+    # list[torch.Tensor] -- [S, N, D]
+    inputs: list[torch.Tensor]
+    # shape: [N]
     labels: torch.Tensor
+
+
+@dataclass
+class Sample:
+    """
+    S: sequence_length
+    V: num_vocab
+    C: num_classes
+    """
+
+    # shape: [S, V] -- one-hot encoded sequence
+    input: torch.Tensor
+    # shape: [1] -- class index
+    label: torch.Tensor
 
 
 class Learner:
@@ -24,11 +41,11 @@ class Learner:
         self.criterion = criterion
 
     @abstractmethod
-    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor]:
+    def batch_step(self, batch: Batch) -> tuple[torch.Tensor, torch.Tensor, int]:
         pass
 
     @abstractmethod
-    def collate_batch(self, batch) -> Batch:
+    def collate_batch(self, batch: list[Sample]) -> Batch:
         pass
 
     def epoch_step(
@@ -37,7 +54,7 @@ class Learner:
         epoch_loss = 0
         batch: Batch
         for batch in dataloader:
-            outputs, batch_loss = self.batch_step(batch)
+            outputs, batch_loss, loss_scale = self.batch_step(batch)
 
             if train:
                 self.optimizer.zero_grad()
@@ -47,7 +64,7 @@ class Learner:
             for metric in metrics:
                 metric.update(outputs, batch.labels)
 
-            epoch_loss += batch_loss.item() / len(batch.labels)
+            epoch_loss += batch_loss.item() / loss_scale
 
         return epoch_loss / len(dataloader)
 
@@ -83,6 +100,7 @@ class Learner:
         eval_losses = []
         current_patience = 0
         for epoch in range(num_epochs):
+            start_time = time.time()
             train_loss = self.train(train_dataloader, train_metrics)
             eval_loss = self.eval(eval_dataloader, eval_metrics)
 
@@ -93,7 +111,7 @@ class Learner:
                 metric.on_epoch_complete(epoch)
 
             print(
-                f"{epoch}/{num_epochs} \tTrain loss \t{train_loss:.4f} \tEval loss \t{eval_loss:.4f}"
+                f"{epoch}/{num_epochs} -- {time.time() - start_time:.2f}s \tTrain loss \t{train_loss:.4f} \tEval loss \t{eval_loss:.4f}"
             )
 
             train_losses.append(train_loss)
@@ -119,7 +137,7 @@ class Learner:
         seq_length: S
         input_size: D
 
-        input: [S, D]
+        input: [S, 1, D]
         """
         _, idx = self.predict_topk(input, k=1)
         return int(idx.item())
@@ -131,15 +149,12 @@ class Learner:
         seq_length: S
         input_size: D
 
-        input: [S, D]
+        input: [S, 1, D]
 
         returns:
             likelihoods: [K]
             indices: [K]
         """
-        # Add a batch dimension to the input
-        # input: [S, D] -> [S, 1, D]
-        input = input.unsqueeze(1)
         self.model.eval()
         with torch.no_grad():
             # output: [1, C]
