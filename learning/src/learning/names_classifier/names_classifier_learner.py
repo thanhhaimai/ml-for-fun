@@ -18,6 +18,86 @@ class Batch:
         return cls(samples=batch)
 
 
+class NamesClassifierRNN(nn.Module):
+    """
+    D: input_size
+    H: hidden_size
+    C: output_size
+
+    S: sequence_length
+    N: batch_size
+    """
+
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+
+        # rnn: [S, N, D] -> hidden [N, H]
+        self.rnn = nn.RNN(input_size=input_size, hidden_size=hidden_size)
+
+        # fc: [N, H] -> [N, C]
+        self.fc = nn.Linear(hidden_size, output_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: shape [S, N, D]
+        """
+        # hidden: [N, H]
+        _rnn_output, hidden = self.rnn(x)
+
+        # output: [N, C]
+        output = self.fc(hidden[0])
+        return output
+
+
+class NamesClassifierLSTM(nn.Module):
+    """
+    D: input_size
+    H: hidden_size
+    C: output_size
+
+    S: sequence_length
+    N: batch_size
+    """
+
+    def __init__(self, input_size, hidden_size, output_size):
+        super().__init__()
+
+        # num_layers * num_directions == 4
+        # lstm: [S, N, D] -> hidden [4, N, H]
+        # Need to concatenate the last 2 hidden states since this is a bidirectional LSTM
+        # hidden: [4, N, H] -> [N, H * 2]
+        self.lstm = nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            batch_first=False,
+            num_layers=2,
+            bidirectional=True,
+        )
+
+        # dropout: [N, H * 2] -> [N, H * 2]
+        self.dropout = nn.Dropout(p=0.5)
+
+        # fc: [N, H * 2] -> [N, C]
+        self.fc = nn.Linear(hidden_size * 2, output_size)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: shape [S, N, D]
+        """
+        # hidden: [num_layers * num_directions, N, H]
+        _lstm_output, (hidden, _cell) = self.lstm(x)
+
+        # bidirectional_hidden_state: [N, H * 2]
+        bidirectional_hidden_state = torch.cat((hidden[-2], hidden[-1]), dim=1)
+
+        # dropout_output: [N, H * 2]
+        dropout_output = self.dropout(bidirectional_hidden_state)
+
+        # output: [N, C]
+        output = self.fc(dropout_output)
+        return output
+
+
 class SequentialBatchLearner(Learner[Batch]):
     def __init__(
         self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
