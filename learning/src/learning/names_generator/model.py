@@ -29,21 +29,13 @@ class NamesGenerator(nn.Module):
     def forward(self, category, input, hidden):
         """
         category: [1, C]
-        input: [S, V]
+        input: [1, V]
         hidden: [1, H]
         """
         # print(f"{category.shape=}, {input.shape=}, {hidden.shape=}")
-        sequence_length = input.shape[0]
 
         # [S, C + V + H]
-        input_combined = torch.cat(
-            (
-                category.expand(sequence_length, -1),
-                input,
-                hidden.expand(sequence_length, -1),
-            ),
-            1,
-        )
+        input_combined = torch.cat((category, input, hidden), -1)
         # print(f"{input_combined.shape=}")
 
         # [S, H]
@@ -55,7 +47,7 @@ class NamesGenerator(nn.Module):
         # print(f"{output.shape=}")
 
         # [S, H + V]
-        output_combined = torch.cat((hidden, output), 1)
+        output_combined = torch.cat((hidden, output), -1)
         # print(f"{output_combined.shape=}")
 
         # [S, V]
@@ -88,12 +80,11 @@ class SequentialBatchLearner(Learner[Batch]):
         super().__init__(model, optimizer, criterion)
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        batch_loss = torch.tensor(0.0)
-        loss_count = 0
-
         # Declare that the model is a NamesGenerator
         self.model: NamesGenerator
 
+        batch_loss = torch.tensor(0.0)
+        loss_count = 0
         for sample in batch.samples:
             # For every sample, we need to initialize the hidden state from scratch
             # shape: [1, H]
@@ -103,7 +94,8 @@ class SequentialBatchLearner(Learner[Batch]):
                 # output: [1, V]
                 # hidden: [1, H]
                 output, hidden = self.model(sample.category, x.unsqueeze(0), hidden)
-                batch_loss += self.criterion(output, y.unsqueeze(0))
+
+                batch_loss += self.criterion(output.squeeze(0), y)
                 loss_count += 1
 
         return BatchResult(
@@ -121,20 +113,37 @@ class ParallelBatchLearner(Learner):
         super().__init__(model, optimizer, criterion)
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        # shape: [N, S, V]
+        # shape: [S, N, V]
         inputs = pad_sequence([sample.input for sample in batch.samples])
-        # shape: [N, S, 1]
+        # shape: [S, N]
         labels = pad_sequence([sample.label for sample in batch.samples])
-        # shape: [N, 1, C]
+        # shape: [1, N, C]
         categories = pad_sequence([sample.category for sample in batch.samples])
 
-        # shape: [N, S, C]
-        outputs = self.model(categories, inputs)
-        batch_loss = self.criterion(outputs, labels)
+        # Declare that the model is a NamesGenerator
+        self.model: NamesGenerator
+
+        # shape: [1, N, H]
+        hidden = (
+            self.model.init_hidden().unsqueeze(1).expand(-1, len(batch.samples), -1)
+        )
+        # print(f"{hidden.shape=}")
+
+        batch_loss = torch.tensor(0.0)
+        loss_count = 0
+        for x, y in zip(inputs, labels):
+            # inputs: [N, V]
+            # labels: [N]
+            # output: [N, V]
+            # hidden: [N, H]
+            output, hidden = self.model(categories, x.unsqueeze(0), hidden)
+
+            batch_loss += self.criterion(output.squeeze(0), y)
+            loss_count += 1
 
         return BatchResult(
-            outputs=outputs,
-            labels=labels,
+            outputs=torch.zeros([1, 1]),
+            labels=torch.zeros([1, 1]),
             loss=batch_loss,
-            loss_scale=1,
+            loss_scale=loss_count,
         )
