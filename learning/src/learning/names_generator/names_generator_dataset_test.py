@@ -77,9 +77,10 @@ def test_names_dataset_basic(test_dir):
     # First sample is English, .John~
     # The sequence length is 5 because we count the start token for input, and the end token for label
     # There are 9 tokens, and 2 extra tokens for the start and end tokens
+    print(sample)
     assert sample.category.shape == (1, 2)
     assert sample.input.shape == (5, 11)
-    assert sample.label.shape == (5, 1)
+    assert sample.label.shape == (5,)
 
 
 def test_names_dataset_out_of_range(test_dir):

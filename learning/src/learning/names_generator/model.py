@@ -13,6 +13,8 @@ class NamesGenerator(nn.Module):
     def __init__(self, hidden_size, num_vocab, num_classes):
         super().__init__()
         self.hidden_size = hidden_size
+        self.num_vocab = num_vocab
+        self.num_classes = num_classes
 
         # [S, C + V + H] -> [S, H]
         self.i2h = nn.Linear(num_classes + num_vocab + hidden_size, hidden_size)
@@ -26,14 +28,22 @@ class NamesGenerator(nn.Module):
 
     def forward(self, category, input, hidden):
         """
-        category: [S, C]
+        category: [1, C]
         input: [S, V]
-        hidden: [S, H]
+        hidden: [1, H]
         """
         # print(f"{category.shape=}, {input.shape=}, {hidden.shape=}")
+        sequence_length = input.shape[0]
 
         # [S, C + V + H]
-        input_combined = torch.cat((category, input, hidden), 1)
+        input_combined = torch.cat(
+            (
+                category.expand(sequence_length, -1),
+                input,
+                hidden.expand(sequence_length, -1),
+            ),
+            1,
+        )
         # print(f"{input_combined.shape=}")
 
         # [S, H]
@@ -78,9 +88,8 @@ class SequentialBatchLearner(Learner[Batch]):
         super().__init__(model, optimizer, criterion)
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        outputs: list[torch.Tensor] = []
-        labels: list[torch.Tensor] = []
         batch_loss = torch.tensor(0.0)
+        loss_count = 0
 
         # Declare that the model is a NamesGenerator
         self.model: NamesGenerator
@@ -90,23 +99,18 @@ class SequentialBatchLearner(Learner[Batch]):
             # shape: [1, H]
             hidden = self.model.init_hidden()
 
-            # output: [1, C]
-            output, hidden = self.model(sample.category, sample.input, hidden)
-            outputs.append(output)
-            labels.append(sample.label)
-            batch_loss += self.criterion(output, sample.label)
-
-        # outputs: [S, C]
-        outputs_tensor = torch.cat(outputs, dim=0)
-
-        # labels: [S, 1]
-        labels_tensor = torch.cat(labels, dim=0)
+            for x, y in zip(sample.input, sample.label):
+                # output: [1, V]
+                # hidden: [1, H]
+                output, hidden = self.model(sample.category, x.unsqueeze(0), hidden)
+                batch_loss += self.criterion(output, y.unsqueeze(0))
+                loss_count += 1
 
         return BatchResult(
-            outputs=outputs_tensor,
-            labels=labels_tensor,
+            outputs=torch.zeros([1, 1]),
+            labels=torch.zeros([1, 1]),
             loss=batch_loss,
-            loss_scale=len(batch.samples),
+            loss_scale=loss_count,
         )
 
 
@@ -121,7 +125,7 @@ class ParallelBatchLearner(Learner):
         inputs = pad_sequence([sample.input for sample in batch.samples])
         # shape: [N, S, 1]
         labels = pad_sequence([sample.label for sample in batch.samples])
-        # shape: [N, S, C]
+        # shape: [N, 1, C]
         categories = pad_sequence([sample.category for sample in batch.samples])
 
         # shape: [N, S, C]
