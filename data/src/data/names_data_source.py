@@ -54,17 +54,18 @@ class NamesDataSource:
         Args:
             data_folder: Path to the folder containing text files, where each file represents a country and contains names.
         """
-        names: dict[int, list[str]] = defaultdict(list)
-        countries: list[str] = []
+        data: dict[int, list[str]] = defaultdict(list)
+        all_countries: list[str] = []
 
         all_files = sorted(glob.glob(f"{data_folder}/*.txt"))
         vocab = set()
         for file_path in all_files:
             country_name = file_path.split("/")[-1].split(".")[0]
-            countries.append(country_name)
+            all_countries.append(country_name)
 
-            country_idx = len(countries) - 1
+            country_idx = len(all_countries) - 1
             with open(file_path, "r") as file:
+                names = set()
                 for line in file:
                     name = line.strip()
                     if not name:
@@ -76,7 +77,9 @@ class NamesDataSource:
                     if suffix:
                         name = name + suffix
                     vocab.update(name)
-                    names[country_idx].append(name)
+                    names.add(name)
+
+            data[country_idx].extend(sorted(names))
 
         tokenizer.load(vocab)
-        return cls(names, countries, tokenizer)
+        return cls(data, all_countries, tokenizer)

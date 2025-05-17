@@ -28,7 +28,7 @@ def real_data_dir():
 def test_load_basic(test_dir, tokenizer: Tokenizer):
     ds = NamesDataSource.load(str(test_dir), tokenizer=tokenizer)
     assert ds.countries == ["English", "French"]
-    assert ds.country_idx_to_names[0] == ["John", "Jane"]
+    assert ds.country_idx_to_names[0] == ["Jane", "John"]
     assert ds.country_idx_to_names[1] == ["Jean", "Marie"]
     assert set("JohnJaneJeanMarie").issubset(ds.tokenizer.index_to_token)
     assert ds.num_classes == 2
