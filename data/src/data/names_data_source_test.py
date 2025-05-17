@@ -3,10 +3,12 @@ import os
 import pytest
 
 from data.names_data_source import NamesDataSource, unicode_to_ascii
+from data.tokenizer import Tokenizer
 
 
-def make_data_source(test_dir, **kwargs):
-    return NamesDataSource.load(str(test_dir), **kwargs)
+@pytest.fixture
+def tokenizer() -> Tokenizer:
+    return Tokenizer()
 
 
 @pytest.fixture
@@ -23,14 +25,13 @@ def real_data_dir():
     return os.path.join(os.path.dirname(__file__), "../../../datasets/names")
 
 
-def test_load_basic(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
+def test_load_basic(test_dir, tokenizer: Tokenizer):
+    ds = NamesDataSource.load(str(test_dir), tokenizer=tokenizer)
     assert ds.countries == ["English", "French"]
     assert ds.country_idx_to_names[0] == ["John", "Jane"]
     assert ds.country_idx_to_names[1] == ["Jean", "Marie"]
-    assert set(ds.tokens) >= set("JohnJaneJeanMarie")
+    assert set("JohnJaneJeanMarie").issubset(ds.tokenizer.index_to_token)
     assert ds.num_classes == 2
-    assert ds.num_vocab == len(ds.tokens)
 
 
 def test_unicode_to_ascii():
@@ -39,68 +40,46 @@ def test_unicode_to_ascii():
     assert unicode_to_ascii("François") == "Francois"
 
 
-def test_prefix_suffix(test_dir):
-    ds = NamesDataSource.load(str(test_dir), prefix="*", suffix="$")
+def test_prefix_suffix(test_dir, tokenizer: Tokenizer):
+    ds = NamesDataSource.load(
+        str(test_dir), tokenizer=tokenizer, prefix="*", suffix="$"
+    )
     for names in ds.country_idx_to_names.values():
         for name in names:
             assert name.startswith("*")
             assert name.endswith("$")
+    assert "*" in ds.tokenizer.token_to_index
+    assert "$" in ds.tokenizer.token_to_index
 
 
-def test_normalize_unicode(test_dir):
-    # Write a name with accents
+def test_normalize_unicode(test_dir, tokenizer: Tokenizer):
     (test_dir / "Vietnamese.txt").write_text("Đặng\n")
-    ds = NamesDataSource.load(str(test_dir), normalize_unicode=True)
-    found = any("Đang" in name for name in ds.country_idx_to_names[2])
-    assert found
+    ds = NamesDataSource.load(
+        str(test_dir), tokenizer=tokenizer, normalize_unicode=True
+    )
+    assert "Đang" in ds.country_idx_to_names[2]
+    assert "Đ" in ds.tokenizer.token_to_index
+    assert "ạ" not in ds.tokenizer.token_to_index
+    assert "ă" not in ds.tokenizer.token_to_index
+    assert "g" in ds.tokenizer.token_to_index
 
 
-def test_tokenization_and_detokenization(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
-    name = "John"
-    indices = ds.t2i(name)
-    assert isinstance(indices, list)
-    assert ds.i2t(indices) == name
-
-
-def test_empty_folder(tmp_path):
+def test_empty_folder(tmp_path, tokenizer: Tokenizer):
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
-    ds = NamesDataSource.load(str(empty_dir))
+    ds = NamesDataSource.load(str(empty_dir), tokenizer=tokenizer)
     assert ds.num_classes == 0
-    assert ds.num_vocab == 0
     assert ds.countries == []
     assert ds.country_idx_to_names == {}
 
 
-def test_real_data(real_data_dir):
-    ds = NamesDataSource.load(real_data_dir)
+def test_real_data(real_data_dir, tokenizer: Tokenizer):
+    ds = NamesDataSource.load(real_data_dir, tokenizer=tokenizer)
     assert ds.num_classes > 0
-    assert ds.num_vocab > 0
+    assert ds.tokenizer.vocab_size > 0
     assert all(isinstance(c, str) for c in ds.countries)
     assert all(isinstance(names, list) for names in ds.country_idx_to_names.values())
-    # Check that all names are strings and non-empty
     for names in ds.country_idx_to_names.values():
         for name in names:
             assert isinstance(name, str)
             assert name
-
-
-def test_name_to_one_hot_and_back(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
-    name = "John"
-    one_hot = ds.name_to_one_hot(name)
-    assert one_hot.shape[0] == len(name)
-    assert one_hot.shape[2] == ds.num_vocab
-    # Remove batch dim for one_hot_to_name
-    recovered = ds.one_hot_to_name(one_hot.squeeze(1))
-    assert recovered == name
-
-
-def test_country_index_to_one_hot(test_dir):
-    ds = NamesDataSource.load(str(test_dir))
-    for idx in range(ds.num_classes):
-        one_hot = ds.country_index_to_one_hot(idx)
-        assert one_hot.shape[0] == ds.num_classes
-        assert one_hot[idx] == 1.0
-        assert one_hot.sum() == 1.0

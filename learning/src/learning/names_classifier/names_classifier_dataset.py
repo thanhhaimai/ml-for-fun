@@ -4,6 +4,7 @@ import torch
 from torch.utils.data import Dataset
 
 from data.names_data_source import NamesDataSource
+from data.tokenizer import Tokenizer
 
 
 @dataclass
@@ -31,6 +32,7 @@ class NamesClassifierDataset(Dataset[NameSample]):
     def __init__(
         self,
         names_data_source: NamesDataSource,
+        tokenizer: Tokenizer,
     ):
         self.names_data_source = names_data_source
         self.samples: list[NameSample] = []
@@ -39,7 +41,7 @@ class NamesClassifierDataset(Dataset[NameSample]):
             for name in names:
                 self.samples.append(
                     NameSample(
-                        input=self.names_data_source.name_to_one_hot(name),
+                        input=tokenizer.to_one_hot(name, batch_dim=1),
                         label=torch.tensor(country_idx).unsqueeze(0),
                     )
                 )

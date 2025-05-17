@@ -1,9 +1,11 @@
 from dataclasses import dataclass
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 from data.names_data_source import NamesDataSource
+from data.tokenizer import Tokenizer
 
 
 @dataclass
@@ -39,6 +41,7 @@ class NamesGeneratorDataset(Dataset[NameSample]):
     def __init__(
         self,
         names_data_source: NamesDataSource,
+        tokenizer: Tokenizer,
     ):
         self.names_data_source = names_data_source
         self.samples: list[NameSample] = []
@@ -46,7 +49,7 @@ class NamesGeneratorDataset(Dataset[NameSample]):
         for country_idx, names in names_data_source.country_idx_to_names.items():
             for name in names:
                 # shape: [S, 1, V]
-                name_one_hot = self.names_data_source.name_to_one_hot(name)
+                name_one_hot = tokenizer.to_one_hot(name)
                 # shape: [S, V]
                 name_one_hot.squeeze_(dim=1)
 
@@ -54,12 +57,10 @@ class NamesGeneratorDataset(Dataset[NameSample]):
                 input = name_one_hot[:-1]
                 # shape: [S]
                 label = torch.tensor(
-                    [self.names_data_source.t2i(c) for c in name[1:]], dtype=torch.long
+                    [tokenizer.t2i(c) for c in name[1:]], dtype=torch.long
                 ).squeeze(1)
                 # shape: [1, C]
-                category = names_data_source.country_index_to_one_hot(
-                    country_idx
-                ).unsqueeze(0)
+                category = self.country_index_to_one_hot(country_idx).unsqueeze(0)
 
                 self.samples.append(
                     NameSample(
@@ -74,3 +75,12 @@ class NamesGeneratorDataset(Dataset[NameSample]):
 
     def __getitem__(self, idx) -> NameSample:
         return self.samples[idx]
+
+    def country_index_to_one_hot(self, country_idx: int) -> torch.Tensor:
+        """
+        return: shape [num_classes]
+        """
+        return F.one_hot(
+            torch.tensor(country_idx),
+            num_classes=self.names_data_source.num_classes,
+        ).float()
