@@ -24,39 +24,39 @@ class NamesGenerator(nn.Module):
         self.o2o = nn.Linear(hidden_size + num_vocab, num_vocab)
 
         self.dropout = nn.Dropout(0.1)
-        self.softmax = nn.LogSoftmax(dim=1)
+        self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, category, input, hidden):
         """
-        category: [1, C]
-        input: [1, V]
-        hidden: [1, H]
+        category: [N, C]
+        input: [N, V]
+        hidden: [N, H]
         """
         # print(f"{category.shape=}, {input.shape=}, {hidden.shape=}")
 
-        # [S, C + V + H]
+        # [N, C + V + H]
         input_combined = torch.cat((category, input, hidden), -1)
         # print(f"{input_combined.shape=}")
 
-        # [S, H]
+        # [N, H]
         hidden = self.i2h(input_combined)
         # print(f"{hidden.shape=}")
 
-        # [S, V]
+        # [N, V]
         output = self.i2o(input_combined)
         # print(f"{output.shape=}")
 
-        # [S, H + V]
+        # [N, H + V]
         output_combined = torch.cat((hidden, output), -1)
         # print(f"{output_combined.shape=}")
 
-        # [S, V]
+        # [N, V]
         output = self.o2o(output_combined)
         # print(f"{output.shape=}")
 
-        # [S, V]
+        # [N, V]
         output = self.dropout(output)
-        # [S, V]
+        # [N, V]
         output = self.softmax(output)
         return output, hidden
 
@@ -90,12 +90,14 @@ class SequentialBatchLearner(Learner[Batch]):
             # shape: [1, H]
             hidden = self.model.init_hidden()
 
-            for x, y in zip(sample.input, sample.label):
+            # input: [1, V]
+            # label: [1]
+            for input, label in zip(sample.input, sample.label):
                 # output: [1, V]
                 # hidden: [1, H]
-                output, hidden = self.model(sample.category, x.unsqueeze(0), hidden)
+                output, hidden = self.model(sample.category, input.unsqueeze(0), hidden)
 
-                batch_loss += self.criterion(output.squeeze(0), y)
+                batch_loss += self.criterion(output.squeeze(0), label)
                 loss_count += 1
 
         return BatchResult(
@@ -113,32 +115,29 @@ class ParallelBatchLearner(Learner):
         super().__init__(model, optimizer, criterion)
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        # shape: [S, N, V]
-        inputs = pad_sequence([sample.input for sample in batch.samples])
-        # shape: [S, N]
-        labels = pad_sequence([sample.label for sample in batch.samples])
-        # shape: [1, N, C]
-        categories = pad_sequence([sample.category for sample in batch.samples])
+        # shape: [N, C]
+        categories = torch.cat([sample.category for sample in batch.samples])
 
         # Declare that the model is a NamesGenerator
         self.model: NamesGenerator
+        # shape: [N, H]
+        hidden = self.model.init_hidden().expand(len(batch.samples), -1)
 
-        # shape: [1, N, H]
-        hidden = (
-            self.model.init_hidden().unsqueeze(1).expand(-1, len(batch.samples), -1)
-        )
-        # print(f"{hidden.shape=}")
+        # shape: [S, N, V]
+        padded_inputs = pad_sequence([sample.input for sample in batch.samples])
+
+        # shape: [S, N]
+        padded_labels = pad_sequence([sample.label for sample in batch.samples])
 
         batch_loss = torch.tensor(0.0)
         loss_count = 0
-        for x, y in zip(inputs, labels):
-            # inputs: [N, V]
-            # labels: [N]
+        # input: [N, V]
+        # label: [N]
+        for input, label in zip(padded_inputs, padded_labels):
             # output: [N, V]
             # hidden: [N, H]
-            output, hidden = self.model(categories, x.unsqueeze(0), hidden)
-
-            batch_loss += self.criterion(output.squeeze(0), y)
+            output, hidden = self.model(categories, input, hidden)
+            batch_loss += self.criterion(output, label)
             loss_count += 1
 
         return BatchResult(
