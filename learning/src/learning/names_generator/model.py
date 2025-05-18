@@ -24,7 +24,6 @@ class NamesGenerator(nn.Module):
         self.o2o = nn.Linear(hidden_size + num_vocab, num_vocab)
 
         self.dropout = nn.Dropout(0.1)
-        self.softmax = nn.LogSoftmax(dim=-1)
 
     def forward(self, category, input, hidden):
         """
@@ -56,8 +55,6 @@ class NamesGenerator(nn.Module):
 
         # [N, V]
         output = self.dropout(output)
-        # [N, V]
-        output = self.softmax(output)
         return output, hidden
 
     def init_hidden(self):
@@ -110,9 +107,15 @@ class SequentialBatchLearner(Learner[Batch]):
 
 class ParallelBatchLearner(Learner):
     def __init__(
-        self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        criterion: nn.Module,
+        padding_idx: int,
     ):
         super().__init__(model, optimizer, criterion)
+        self.padding_idx = padding_idx
+        assert self.criterion.reduction == "sum", "Reduction must be 'sum'"
 
     def batch_step(self, batch: Batch) -> BatchResult:
         # shape: [N, C]
@@ -127,22 +130,35 @@ class ParallelBatchLearner(Learner):
         padded_inputs = pad_sequence([sample.input for sample in batch.samples])
 
         # shape: [S, N]
-        padded_labels = pad_sequence([sample.label for sample in batch.samples])
+        padded_labels = pad_sequence(
+            [sample.label for sample in batch.samples],
+            batch_first=False,
+            padding_value=self.padding_idx,
+        )
 
         batch_loss = torch.tensor(0.0)
-        loss_count = 0
+        total_valid_tokens = 0
         # input: [N, V]
         # label: [N]
         for input, label in zip(padded_inputs, padded_labels):
             # output: [N, V]
             # hidden: [N, H]
             output, hidden = self.model(categories, input, hidden)
-            batch_loss += self.criterion(output, label)
-            loss_count += 1
+
+            # Number of valid (non-padding) tokens in the current step for this batch
+            num_valid_tokens = (label != self.padding_idx).sum().item()
+            if num_valid_tokens == 0:
+                continue
+
+            loss = self.criterion(output, label)
+
+            # Reduction is set to "sum"
+            batch_loss += loss
+            total_valid_tokens += num_valid_tokens
 
         return BatchResult(
             outputs=torch.zeros([1, 1]),
             labels=torch.zeros([1, 1]),
             loss=batch_loss,
-            loss_scale=loss_count,
+            loss_scale=int(total_valid_tokens) if total_valid_tokens > 0 else 1,
         )
