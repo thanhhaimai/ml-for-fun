@@ -3,7 +3,7 @@ from typing import Self
 
 import torch
 from torch import nn, optim
-from torch.nn.utils.rnn import pad_sequence
+from torch.nn.utils.rnn import PackedSequence, pack_padded_sequence, pad_sequence
 
 from learning.learner import BatchResult, Learner
 from learning.names_classifier.names_classifier_dataset import NameSample
@@ -135,15 +135,29 @@ class ParallelBatchLearner(Learner):
         super().__init__(model, optimizer, criterion)
 
     def batch_step(self, batch: Batch) -> BatchResult:
+        # Sort samples by input length in descending order
+        batch.samples.sort(key=lambda x: len(x.input), reverse=True)
+
         # sample.input: [S, 1, V]
-        # inputs: [N, S, V]
-        inputs = pad_sequence([sample.input for sample in batch.samples]).squeeze(2)
+        # inputs: [S, N, V]
+        padded_inputs = pad_sequence(
+            [sample.input for sample in batch.samples],
+            batch_first=False,
+        ).squeeze(2)
+
+        packed_inputs: PackedSequence = pack_padded_sequence(
+            input=padded_inputs,
+            lengths=[len(sample.input) for sample in batch.samples],
+            batch_first=False,
+            enforce_sorted=True,
+        )
+
         # sample.label: [1]
         # labels: [N]
         labels = torch.cat([sample.label for sample in batch.samples])
-        # shape: [N, C]
-        outputs = self.model(inputs)
 
+        # shape: [N, C]
+        outputs = self.model(packed_inputs)
         batch_loss = self.criterion(outputs, labels)
 
         return BatchResult(
