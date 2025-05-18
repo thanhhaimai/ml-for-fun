@@ -138,14 +138,16 @@ class ParallelBatchLearner(Learner):
 
         batch_loss = torch.tensor(0.0)
         total_valid_tokens = 0
+        outputs = []
+
         # input: [N, V]
         # label: [N]
         for input, label in zip(padded_inputs, padded_labels):
             # output: [N, V]
             # hidden: [N, H]
             output, hidden = self.model(categories, input, hidden)
+            outputs.append(output)
 
-            # Number of valid (non-padding) tokens in the current step for this batch
             num_valid_tokens = (label != self.padding_idx).sum().item()
             if num_valid_tokens == 0:
                 continue
@@ -157,8 +159,8 @@ class ParallelBatchLearner(Learner):
             total_valid_tokens += num_valid_tokens
 
         return BatchResult(
-            outputs=torch.zeros([1, 1]),
-            labels=torch.zeros([1, 1]),
+            outputs=torch.stack(outputs),
+            labels=padded_labels,
             loss=batch_loss,
             loss_scale=int(total_valid_tokens) if total_valid_tokens > 0 else 1,
         )

@@ -43,18 +43,21 @@ class ConfusionMatrixMetric(Metric):
         labels: torch.Tensor,
     ):
         """
-        outputs: [N, C] -- batch of logits
-        labels: [N] -- batch of label indices
+        outputs: [*, N, C] -- batch of logits
+        labels: [*, N] -- batch of label indices
         """
-        if outputs.shape[0] != labels.shape[0]:
+        if outputs.shape[-1] != self.num_classes:
             raise ValueError(
-                f"Expect outputs.shape[0] == labels.shape[0], but got {outputs.shape[0]} != {labels.shape[0]}"
+                f"Expect outputs.shape[-1] == {self.num_classes}, but got {outputs.shape[-1]}"
             )
 
-        if outputs.shape[1] != self.num_classes:
+        if outputs.shape[-2] != labels.shape[-1]:
             raise ValueError(
-                f"Expect outputs.shape[1] == {self.num_classes}, but got {outputs.shape[1]}"
+                f"Expect outputs.shape[-2] == labels.shape[-1], but got {outputs.shape[-2]} != {labels.shape[-1]}"
             )
+
+        outputs = outputs.view(-1, self.num_classes)
+        labels = labels.view(-1)
 
         # predictions: [N]
         predictions = outputs.argmax(dim=1)
