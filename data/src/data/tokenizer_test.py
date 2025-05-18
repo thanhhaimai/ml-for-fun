@@ -15,13 +15,25 @@ def tokenizer() -> Tokenizer:
 
 
 def test_load(tokenizer: Tokenizer):
-    assert tokenizer.special_tokens == [Tokenizer.PAD_TOKEN]
-    assert set(tokenizer.index_to_token) == set("helowrd") | set(
-        tokenizer.special_tokens
-    )
-    assert len(tokenizer.index_to_token) == len(set("helowrd")) + len(
-        tokenizer.special_tokens
-    )
+    assert set(tokenizer.index_to_token) == set("helowrd") | {Tokenizer.PAD_TOKEN}
+    assert len(tokenizer.index_to_token) == len(set("helowrd")) + 1
+    assert tokenizer.vocab_size == len(tokenizer.token_to_index)
+    for char, index in tokenizer.token_to_index.items():
+        assert tokenizer.index_to_token[index] == char
+
+
+def test_load_start_end():
+    tokenizer = Tokenizer(use_start_token=True, use_end_token=True)
+    data = set()
+    data.update("hello")
+    data.update("world")
+    tokenizer.load(data)
+    assert set(tokenizer.index_to_token) == set("helowrd") | {
+        Tokenizer.PAD_TOKEN,
+        Tokenizer.START_TOKEN,
+        Tokenizer.END_TOKEN,
+    }
+    assert len(tokenizer.index_to_token) == len(set("helowrd")) + 3
     assert tokenizer.vocab_size == len(tokenizer.token_to_index)
     for char, index in tokenizer.token_to_index.items():
         assert tokenizer.index_to_token[index] == char
@@ -41,6 +53,11 @@ def test_i2t(tokenizer: Tokenizer):
     indices = tokenizer.t2i(original_string)
     reconstructed_string = tokenizer.i2t(indices)
     assert reconstructed_string == original_string
+
+    assert (
+        tokenizer.i2t([tokenizer.token_to_index[Tokenizer.PAD_TOKEN]])
+        == Tokenizer.PAD_TOKEN
+    )
 
 
 def test_t2i_empty_string(tokenizer: Tokenizer):

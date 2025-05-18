@@ -5,9 +5,6 @@ from typing import Self
 
 from data.tokenizer import Tokenizer
 
-START_TOKEN = "."
-END_TOKEN = "~"
-
 
 def unicode_to_ascii(s: str) -> str:
     """
@@ -44,8 +41,6 @@ class NamesDataSource:
         cls,
         data_folder: str,
         tokenizer: Tokenizer,
-        prefix: str = "",
-        suffix: str = "",
         normalize_unicode: bool = False,
     ) -> Self:
         """
@@ -72,10 +67,6 @@ class NamesDataSource:
                         continue
                     if normalize_unicode:
                         name = unicode_to_ascii(name)
-                    if prefix:
-                        name = prefix + name
-                    if suffix:
-                        name = name + suffix
                     vocab.update(name)
                     names.add(name)
 

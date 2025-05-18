@@ -40,18 +40,6 @@ def test_unicode_to_ascii():
     assert unicode_to_ascii("François") == "Francois"
 
 
-def test_prefix_suffix(test_dir, tokenizer: Tokenizer):
-    ds = NamesDataSource.load(
-        str(test_dir), tokenizer=tokenizer, prefix="*", suffix="$"
-    )
-    for names in ds.country_idx_to_names.values():
-        for name in names:
-            assert name.startswith("*")
-            assert name.endswith("$")
-    assert "*" in ds.tokenizer.token_to_index
-    assert "$" in ds.tokenizer.token_to_index
-
-
 def test_normalize_unicode(test_dir, tokenizer: Tokenizer):
     (test_dir / "Vietnamese.txt").write_text("Đặng\n")
     ds = NamesDataSource.load(

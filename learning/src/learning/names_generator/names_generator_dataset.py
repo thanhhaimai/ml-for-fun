@@ -46,19 +46,26 @@ class NamesGeneratorDataset(Dataset[NameSample]):
         self.names_data_source = names_data_source
         self.samples: list[NameSample] = []
 
+        # shape: [1, V]
+        start_token_one_hot = tokenizer.to_one_hot(Tokenizer.START_TOKEN)
+        end_token_idx = tokenizer.token_to_index[Tokenizer.END_TOKEN]
+
         for country_idx, names in names_data_source.country_idx_to_names.items():
             for name in names:
-                # shape: [S, 1, V]
-                name_one_hot = tokenizer.to_one_hot(name)
-                # shape: [S, V]
-                name_one_hot.squeeze_(dim=1)
+                # shape: [S+1, V] -- input is padded with start token
+                input = torch.cat(
+                    [
+                        start_token_one_hot,
+                        tokenizer.to_one_hot(name),
+                    ],
+                    dim=0,
+                )
+                # shape: [S+1] -- label is padded with end token
+                label_indices = [tokenizer.token_to_index[c] for c in name] + [
+                    end_token_idx
+                ]
+                label = torch.tensor(label_indices, dtype=torch.long)
 
-                # shape: [S, V]
-                input = name_one_hot[:-1]
-                # shape: [S]
-                label = torch.tensor(
-                    [tokenizer.t2i(c) for c in name[1:]], dtype=torch.long
-                ).squeeze(1)
                 # shape: [1, C]
                 category = self.country_index_to_one_hot(country_idx).unsqueeze(0)
 
