@@ -95,21 +95,25 @@ class Learner(Generic[BatchT]):
             for metric in eval_metrics:
                 metric.on_epoch_complete(epoch)
 
-            print(
-                f"{epoch}/{num_epochs} -- {time.time() - start_time:.2f}s \tTrain loss \t{train_loss:.4f} \tEval loss \t{eval_loss:.4f}"
-            )
-
             train_losses.append(train_loss)
             eval_losses.append(eval_loss)
 
             if patience is None:
                 continue
 
-            if eval_loss < best_eval_loss:
+            is_best = eval_loss < best_eval_loss
+            if is_best:
                 best_eval_loss = eval_loss
                 current_patience = 0
             else:
                 current_patience += 1
+
+            print(
+                f"{epoch}/{num_epochs} -- {time.time() - start_time:.2f}s "
+                f"\tTrain loss \t{train_loss:.4f} "
+                f"\tEval loss \t{eval_loss:.4f} "
+                f"\t{'<<' if is_best else ''}"
+            )
 
             if current_patience >= patience:
                 print(f"Early stopping at epoch {epoch}")
