@@ -95,6 +95,64 @@ class NamesClassifierLSTM(nn.Module):
         return output
 
 
+class NamesClassifierGRU(nn.Module):
+    """
+    D: input_size
+    H: hidden_size
+    C: output_size
+
+    S: sequence_length
+    N: batch_size
+    """
+
+    def __init__(self, input_size, hidden_size, output_size, dropout):
+        super().__init__()
+
+        # gru: [S, N, D] or PackedSequence -> hidden [num_layers * num_directions, N, H]
+        # num_layers * num_directions = 2 (since bidirectional=True, num_layers=1)
+        self.gru = nn.GRU(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            batch_first=False,
+            num_layers=1,
+            bidirectional=True,
+        )
+
+        # LayerNorm: [N, H * 2] -> [N, H * 2]
+        self.layer_norm = nn.LayerNorm(hidden_size * 2)
+
+        # dropout: [N, H * 2] -> [N, H * 2]
+        self.dropout = nn.Dropout(p=dropout)  # Use the passed dropout value
+
+        # fc: [N, H * 2] -> [N, C]
+        self.fc = nn.Linear(hidden_size * 2, output_size)
+
+    def forward(self, x: torch.Tensor | PackedSequence) -> torch.Tensor:
+        """
+        x: shape [S, N, D] or PackedSequence
+        """
+        # hidden: [num_layers * num_directions, N, H]
+        # self.gru can handle both Tensor and PackedSequence inputs
+        _gru_output, hidden = self.gru(x)
+
+        # bidirectional_hidden_state: [N, H * 2]
+        # Concatenate the forward and backward hidden states of the last layer
+        bidirectional_hidden_state = torch.cat(
+            (hidden[-2, :, :], hidden[-1, :, :]), dim=1
+        )
+
+        # Apply LayerNorm
+        # normalized_hidden_state: [N, H * 2]
+        normalized_hidden_state = self.layer_norm(bidirectional_hidden_state)
+
+        # dropout_output: [N, H * 2]
+        dropout_output = self.dropout(normalized_hidden_state)
+
+        # output: [N, C]
+        output = self.fc(dropout_output)
+        return output
+
+
 @dataclass
 class Batch:
     samples: list[NameSample]
