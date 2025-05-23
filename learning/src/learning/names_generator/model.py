@@ -9,6 +9,22 @@ from learning.learner import BatchResult, Learner
 from learning.names_generator.names_generator_dataset import NameSample
 
 
+class MLP(nn.Module):
+    def __init__(self, input_size: int, output_size: int, dropout: float):
+        super().__init__()
+        self.norm = nn.LayerNorm(input_size)
+        self.fc = nn.Linear(input_size, output_size)
+        self.gelu = nn.GELU()
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x):
+        x = self.norm(x)
+        x = self.fc(x)
+        x = self.gelu(x)
+        x = self.dropout(x)
+        return x
+
+
 class NamesGenerator(nn.Module):
     def __init__(self, hidden_size, num_vocab, num_classes):
         super().__init__()
@@ -17,13 +33,11 @@ class NamesGenerator(nn.Module):
         self.num_classes = num_classes
 
         # [S, C + V + H] -> [S, H]
-        self.i2h = nn.Linear(num_classes + num_vocab + hidden_size, hidden_size)
+        self.i2h = MLP(num_classes + num_vocab + hidden_size, hidden_size, 0.2)
         # [S, C + V + H] -> [S, V]
-        self.i2o = nn.Linear(num_classes + num_vocab + hidden_size, num_vocab)
+        self.i2o = MLP(num_classes + num_vocab + hidden_size, num_vocab, 0.2)
         # [S, H + V] -> [S, V]
-        self.o2o = nn.Linear(hidden_size + num_vocab, num_vocab)
-
-        self.dropout = nn.Dropout(0.1)
+        self.o2o = MLP(hidden_size + num_vocab, num_vocab, 0.2)
 
     def forward(self, category, input, hidden):
         """
@@ -53,8 +67,6 @@ class NamesGenerator(nn.Module):
         output = self.o2o(output_combined)
         # print(f"{output.shape=}")
 
-        # [N, V]
-        output = self.dropout(output)
         return output, hidden
 
     def init_hidden(self):

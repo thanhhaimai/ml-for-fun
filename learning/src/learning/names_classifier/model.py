@@ -61,12 +61,12 @@ class NamesClassifierLSTM(nn.Module):
             input_size=input_size,
             hidden_size=hidden_size,
             batch_first=False,
-            num_layers=2,
+            num_layers=1,
             bidirectional=True,
         )
 
         # dropout: [N, H * 2] -> [N, H * 2]
-        self.dropout = nn.Dropout(p=0.5)
+        # self.dropout = nn.Dropout(p=0.1)
 
         # fc: [N, H * 2] -> [N, C]
         self.fc = nn.Linear(hidden_size * 2, output_size)
@@ -82,10 +82,10 @@ class NamesClassifierLSTM(nn.Module):
         bidirectional_hidden_state = torch.cat((hidden[-2], hidden[-1]), dim=1)
 
         # dropout_output: [N, H * 2]
-        dropout_output = self.dropout(bidirectional_hidden_state)
+        # dropout_output = self.dropout(bidirectional_hidden_state)
 
         # output: [N, C]
-        output = self.fc(dropout_output)
+        output = self.fc(bidirectional_hidden_state)
         return output
 
 
@@ -164,5 +164,5 @@ class ParallelBatchLearner(Learner):
             outputs=outputs,
             labels=labels,
             loss=batch_loss,
-            loss_scale=1,
+            loss_scale=len(batch.samples),
         )

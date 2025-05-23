@@ -38,20 +38,22 @@ class Learner(Generic[BatchT]):
         self, dataloader: DataLoader[BatchT], metrics: list[Metric], train: bool
     ) -> float:
         epoch_loss = 0
+        epoch_samples = 0
         for batch in dataloader:
             batch_result = self.batch_step(batch)
 
             if train:
                 self.optimizer.zero_grad()
-                batch_result.loss.backward()
+                (batch_result.loss / batch_result.loss_scale).backward()
                 self.optimizer.step()
 
             for metric in metrics:
                 metric.update(batch_result.outputs, batch_result.labels)
 
-            epoch_loss += batch_result.loss.item() / batch_result.loss_scale
+            epoch_loss += batch_result.loss.item()
+            epoch_samples += batch_result.loss_scale
 
-        return epoch_loss / len(dataloader)
+        return epoch_loss / epoch_samples
 
     def train(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
         self.model.train()
