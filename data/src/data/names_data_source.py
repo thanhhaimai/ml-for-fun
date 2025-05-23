@@ -1,6 +1,6 @@
 import glob
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from typing import Self
 
 from data.tokenizer import Tokenizer
@@ -42,6 +42,7 @@ class NamesDataSource:
         data_folder: str,
         tokenizer: Tokenizer,
         normalize_unicode: bool = False,
+        lowercase: bool = False,
     ) -> Self:
         """
         Reads and processes names and their corresponding countries from the specified folder in sorted order.
@@ -67,6 +68,8 @@ class NamesDataSource:
                         continue
                     if normalize_unicode:
                         name = unicode_to_ascii(name)
+                    if lowercase:
+                        name = name.lower()
                     vocab.update(name)
                     names.add(name)
 
@@ -74,3 +77,13 @@ class NamesDataSource:
 
         tokenizer.load(vocab)
         return cls(data, all_countries, tokenizer)
+
+    def class_frequency(self) -> list[float]:
+        return [len(names) for names in self.country_idx_to_names.values()]
+
+    def token_frequency(self) -> list[float]:
+        counter = Counter()
+        for names in self.country_idx_to_names.values():
+            for name in names:
+                counter.update(name)
+        return [counter[token] for token in self.tokenizer.index_to_token]
