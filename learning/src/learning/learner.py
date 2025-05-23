@@ -79,6 +79,7 @@ class Learner(Generic[BatchT]):
         eval_dataloader: DataLoader,
         num_epochs: int,
         patience: int | None,
+        min_delta: float | None,
         train_metrics: list[Metric],
         eval_metrics: list[Metric],
     ) -> tuple[list[float], list[float]]:
@@ -86,6 +87,8 @@ class Learner(Generic[BatchT]):
         train_losses = []
         eval_losses = []
         current_patience = 0
+        effective_min_delta = min_delta if min_delta is not None else 0.0
+
         for epoch in range(num_epochs):
             start_time = time.time()
             train_loss = self.train(train_dataloader, train_metrics)
@@ -103,7 +106,7 @@ class Learner(Generic[BatchT]):
             if patience is None:
                 continue
 
-            is_best = eval_loss < best_eval_loss
+            is_best = eval_loss < best_eval_loss - effective_min_delta
             if is_best:
                 best_eval_loss = eval_loss
                 current_patience = 0
@@ -118,7 +121,7 @@ class Learner(Generic[BatchT]):
             )
 
             if current_patience >= patience:
-                print(f"Early stopping at epoch {epoch}")
+                print(f"Early stopping at epoch {epoch} {best_eval_loss=:.4f}")
                 break
 
         return train_losses, eval_losses

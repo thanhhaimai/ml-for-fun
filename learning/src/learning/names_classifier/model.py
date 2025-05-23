@@ -50,7 +50,7 @@ class NamesClassifierLSTM(nn.Module):
     N: batch_size
     """
 
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, input_size, hidden_size, output_size, dropout):
         super().__init__()
 
         # num_layers * num_directions == 4
@@ -65,8 +65,10 @@ class NamesClassifierLSTM(nn.Module):
             bidirectional=True,
         )
 
+        self.ln1 = nn.LayerNorm(hidden_size * 2)
+
         # dropout: [N, H * 2] -> [N, H * 2]
-        # self.dropout = nn.Dropout(p=0.1)
+        self.dropout = nn.Dropout(p=0.2)
 
         # fc: [N, H * 2] -> [N, C]
         self.fc = nn.Linear(hidden_size * 2, output_size)
@@ -75,17 +77,21 @@ class NamesClassifierLSTM(nn.Module):
         """
         x: shape [S, N, D]
         """
+
         # hidden: [num_layers * num_directions, N, H]
         _lstm_output, (hidden, _cell) = self.lstm(x)
 
         # bidirectional_hidden_state: [N, H * 2]
         bidirectional_hidden_state = torch.cat((hidden[-2], hidden[-1]), dim=1)
 
+        # Apply LayerNorm
+        normalized_hidden_state = self.ln1(bidirectional_hidden_state)
+
         # dropout_output: [N, H * 2]
-        # dropout_output = self.dropout(bidirectional_hidden_state)
+        dropout_output = self.dropout(normalized_hidden_state)
 
         # output: [N, C]
-        output = self.fc(bidirectional_hidden_state)
+        output = self.fc(dropout_output)
         return output
 
 
