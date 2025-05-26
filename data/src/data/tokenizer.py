@@ -38,6 +38,10 @@ class Tokenizer:
 
         self._pad_token_idx = self.token_to_index[self.PAD_TOKEN]
 
+    @property
+    def pad_token_idx(self) -> int:
+        return self._pad_token_idx
+
     def is_special_idx(self, idx: int) -> bool:
         return idx < len(self._special_tokens)
 
