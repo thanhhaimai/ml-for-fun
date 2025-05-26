@@ -50,7 +50,7 @@ def test_basic_dataset_creation(
 
     sample = dataset[0]
     assert isinstance(sample, Sample)
-    assert sample.input.shape == (sequence_length, tokenizer.vocab_size)
+    assert sample.input.shape == (sequence_length,)
     assert sample.label.shape == (sequence_length,)
 
     # Check content of the first sample
@@ -59,7 +59,7 @@ def test_basic_dataset_creation(
     expected_input_text = text_content[:sequence_length]  # "Hello"
     expected_label_text = text_content[1 : sequence_length + 1]  # "ello,"
 
-    assert tokenizer.from_one_hot(sample.input) == expected_input_text
+    assert tokenizer.i2t(sample.input.tolist()) == expected_input_text
     assert tokenizer.i2t(sample.label.tolist()) == expected_label_text
 
     # Check content of the last sample
@@ -76,7 +76,7 @@ def test_basic_dataset_creation(
         len(text_content) - sequence_length : len(text_content)
     ]
 
-    assert tokenizer.from_one_hot(last_sample.input) == expected_last_input_text
+    assert tokenizer.i2t(last_sample.input.tolist()) == expected_last_input_text
     assert tokenizer.i2t(last_sample.label.tolist()) == expected_last_label_text
 
 

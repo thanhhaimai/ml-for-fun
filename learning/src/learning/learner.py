@@ -16,7 +16,7 @@ class BatchResult:
     outputs: torch.Tensor
     labels: torch.Tensor
     loss: torch.Tensor
-    loss_scale: int
+    sample_count: int
 
 
 BatchT = TypeVar("BatchT")
@@ -44,27 +44,39 @@ class Learner(Generic[BatchT]):
 
             if train:
                 self.optimizer.zero_grad()
-                (batch_result.loss / batch_result.loss_scale).backward()
+                (batch_result.loss / batch_result.sample_count).backward()
                 self.optimizer.step()
 
             for metric in metrics:
                 metric.update(batch_result.outputs, batch_result.labels)
 
             epoch_loss += batch_result.loss.item()
-            epoch_samples += batch_result.loss_scale
+            epoch_samples += batch_result.sample_count
 
         return epoch_loss / epoch_samples
 
-    def train(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
+    def train(
+        self,
+        dataloader: DataLoader,
+        metrics: list[Metric] = [],
+    ) -> float:
         self.model.train()
         return self.epoch_step(dataloader, metrics, train=True)
 
-    def eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
+    def eval(
+        self,
+        dataloader: DataLoader,
+        metrics: list[Metric] = [],
+    ) -> float:
         self.model.eval()
         with torch.no_grad():
             return self.epoch_step(dataloader, metrics, train=False)
 
-    def final_eval(self, dataloader: DataLoader, metrics: list[Metric]) -> float:
+    def final_eval(
+        self,
+        dataloader: DataLoader,
+        metrics: list[Metric] = [],
+    ) -> float:
         self.model.eval()
         with torch.no_grad():
             epoch_loss = self.epoch_step(dataloader, metrics, train=False)
@@ -80,8 +92,8 @@ class Learner(Generic[BatchT]):
         num_epochs: int,
         patience: int | None,
         min_delta: float | None,
-        train_metrics: list[Metric],
-        eval_metrics: list[Metric],
+        train_metrics: list[Metric] = [],
+        eval_metrics: list[Metric] = [],
     ) -> tuple[list[float], list[float]]:
         best_eval_loss = math.inf
         train_losses = []

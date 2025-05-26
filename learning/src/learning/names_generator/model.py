@@ -113,7 +113,7 @@ class SequentialBatchLearner(Learner[Batch]):
             outputs=torch.zeros([1, 1]),
             labels=torch.zeros([1, 1]),
             loss=batch_loss,
-            loss_scale=loss_count,
+            sample_count=loss_count,
         )
 
 
@@ -174,5 +174,5 @@ class ParallelBatchLearner(Learner):
             outputs=torch.stack(outputs),
             labels=padded_labels,
             loss=batch_loss,
-            loss_scale=int(total_valid_tokens) if total_valid_tokens > 0 else 1,
+            sample_count=int(total_valid_tokens) if total_valid_tokens > 0 else 1,
         )

@@ -188,7 +188,7 @@ class SequentialBatchLearner(Learner[Batch]):
             outputs=outputs_tensor,
             labels=labels_tensor,
             loss=batch_loss,
-            loss_scale=len(batch.samples),
+            sample_count=len(batch.samples),
         )
 
 
@@ -228,5 +228,5 @@ class ParallelBatchLearner(Learner):
             outputs=outputs,
             labels=labels,
             loss=batch_loss,
-            loss_scale=len(batch.samples),
+            sample_count=len(batch.samples),
         )

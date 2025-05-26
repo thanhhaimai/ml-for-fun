@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 import torch
-from torch.nn import functional as F
 from torch.utils.data import Dataset
 
 from data.shakespeare_data_source import ShakespeareDataSource
@@ -11,14 +10,13 @@ from data.tokenizer import Tokenizer
 @dataclass
 class Sample:
     """
-    A single non-batched sample of a sequence of characters.
+    A single non-batched sample of a sequence of tokens.
 
     T: sequence_length (time dimension)
-    V: num_vocab
     """
 
-    # A sequence of characters is encoded as a one-hot vector
-    # shape: [T, V]
+    # Sequence of indices of tokens
+    # shape: [T]
     input: torch.Tensor
 
     # For each sequence in the input, the label is the index of the next token
@@ -44,18 +42,14 @@ class ShakespeareDataset(Dataset[Sample]):
         self.samples: list[Sample] = []
 
         if not self.shakespeare_data_source.text:
+            print("WARNING: No text found in the data source!")
             return
 
         indices = tokenizer.t2i(self.shakespeare_data_source.text)
-        # shape: [N, V], with N = len(text)
-        one_hot_text = F.one_hot(
-            torch.tensor(indices),
-            num_classes=tokenizer.vocab_size,
-        ).to(torch.float32)
 
-        for i in range(len(one_hot_text) - self.sequence_length):
-            # shape: [T, V]
-            input = one_hot_text[i : i + self.sequence_length]
+        for i in range(len(indices) - self.sequence_length):
+            # shape: [T]
+            input = torch.tensor(indices[i : i + self.sequence_length])
             # shape: [T]
             label = torch.tensor(indices[i + 1 : i + self.sequence_length + 1])
 

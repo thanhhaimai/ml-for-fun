@@ -89,29 +89,41 @@ class Batch:
 class ParallelBatchLearner(Learner[Batch]):
     def __init__(
         self,
-        model: nn.Module,
+        model: ShakespeareGenerator,
         optimizer: optim.Optimizer,
         criterion: nn.Module,
-        padding_idx: int,
     ):
         super().__init__(model, optimizer, criterion)
-        self.padding_idx = padding_idx
+        self.model = model
         assert self.criterion.reduction == "sum", "Reduction must be 'sum'"
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        # shape: [B, S, V]
+        B = len(batch.samples)
+        S = batch.samples[0].input.shape[0]
+        V = self.model.input_size
+
+        # shape: [B, S]
         inputs = torch.stack([sample.input for sample in batch.samples], dim=0)
+        if inputs.shape != (B, S):
+            raise ValueError(f"Invalid {inputs.shape=}, expected: ({B=}, {S=})")
+
         # shape: [B, S]
         labels = torch.stack([sample.label for sample in batch.samples], dim=0)
+        if labels.shape != (B, S):
+            raise ValueError(f"Invalid {labels.shape=}, expected: ({B=}, {S=})")
 
+        # shape: [B, S, V]
         outputs = self.model(inputs)
+        if outputs.shape != (B, S, V):
+            raise ValueError(f"Invalid {outputs.shape=}, expected: ({B=}, {S=}, {V=})")
 
         # `sum` mode
-        batch_loss = self.criterion(outputs, labels)
+        batch_loss = self.criterion(outputs.view(B * S, V), labels.view(B * S))
+        print(batch_loss.item() / (B * S))
 
         return BatchResult(
             outputs=outputs,
             labels=labels,
             loss=batch_loss,
-            loss_scale=len(batch.samples),
+            sample_count=B * S,
         )
