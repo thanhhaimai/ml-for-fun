@@ -13,10 +13,17 @@ class ShakespeareGenerator(nn.Module):
         self,
         input_size: int,
         padding_idx: int,
+        device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
+        self.device = device
         self.input_size = input_size
-        self.embedding = nn.Embedding(input_size, input_size, padding_idx=padding_idx)
+        self.embedding = nn.Embedding(
+            num_embeddings=input_size,
+            embedding_dim=input_size,
+            padding_idx=padding_idx,
+            device=device,
+        )
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
@@ -119,7 +126,6 @@ class ParallelBatchLearner(Learner[Batch]):
 
         # `sum` mode
         batch_loss = self.criterion(outputs.view(B * S, V), labels.view(B * S))
-        print(batch_loss.item() / (B * S))
 
         return BatchResult(
             outputs=outputs,

@@ -35,23 +35,28 @@ class ShakespeareDataset(Dataset[Sample]):
         shakespeare_data_source: ShakespeareDataSource,
         tokenizer: Tokenizer,
         sequence_length: int,
+        device: torch.device = torch.device("cpu"),
     ):
         self.shakespeare_data_source = shakespeare_data_source
         self.sequence_length = sequence_length
         self.tokenizer = tokenizer
+        self.device = device
         self.samples: list[Sample] = []
 
         if not self.shakespeare_data_source.text:
             print("WARNING: No text found in the data source!")
             return
 
-        indices = tokenizer.t2i(self.shakespeare_data_source.text)
+        indices = torch.tensor(
+            data=tokenizer.t2i(self.shakespeare_data_source.text),
+            device=self.device,
+        )
 
         for i in range(len(indices) - self.sequence_length):
             # shape: [T]
-            input = torch.tensor(indices[i : i + self.sequence_length])
+            input = indices[i : i + self.sequence_length]
             # shape: [T]
-            label = torch.tensor(indices[i + 1 : i + self.sequence_length + 1])
+            label = indices[i + 1 : i + self.sequence_length + 1]
 
             self.samples.append(
                 Sample(

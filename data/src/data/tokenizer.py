@@ -20,7 +20,9 @@ class Tokenizer:
         self,
         use_start_token: bool = False,
         use_end_token: bool = False,
+        device: torch.device = torch.device("cpu"),
     ):
+        self.device = device
         self._special_tokens = []
         self._special_tokens.append(self.PAD_TOKEN)
         if use_start_token:
@@ -67,7 +69,7 @@ class Tokenizer:
             shape [S, 1, V] if batch_dim == 1
         """
         one_hot = F.one_hot(
-            torch.tensor(self.t2i(s)),
+            torch.tensor(self.t2i(s), device=self.device),
             num_classes=self.vocab_size,
         ).to(dtype)
 

@@ -101,6 +101,9 @@ class Learner(Generic[BatchT]):
         current_patience = 0
         effective_min_delta = min_delta if min_delta is not None else 0.0
 
+        initial_eval_loss = self.eval(eval_dataloader, eval_metrics)
+        print(f"Initial eval loss: {initial_eval_loss:.4f}")
+
         for epoch in range(num_epochs):
             start_time = time.time()
             train_loss = self.train(train_dataloader, train_metrics)
@@ -115,22 +118,22 @@ class Learner(Generic[BatchT]):
             train_losses.append(train_loss)
             eval_losses.append(eval_loss)
 
-            if patience is None:
-                continue
-
             is_best = eval_loss < best_eval_loss - effective_min_delta
-            if is_best:
-                best_eval_loss = eval_loss
-                current_patience = 0
-            else:
-                current_patience += 1
-
             print(
                 f"{epoch}/{num_epochs} -- {time.time() - start_time:.2f}s "
                 f"\tTrain loss \t{train_loss:.4f} "
                 f"\tEval loss \t{eval_loss:.4f} "
                 f"\t{'<<' if is_best else ''}"
             )
+
+            if patience is None:
+                continue
+
+            if is_best:
+                best_eval_loss = eval_loss
+                current_patience = 0
+            else:
+                current_patience += 1
 
             if current_patience >= patience:
                 print(f"Early stopping at epoch {epoch} {best_eval_loss=:.4f}")
@@ -176,3 +179,6 @@ class Learner(Generic[BatchT]):
             topk_probabilities = torch.gather(probabilities, dim=1, index=indices)
 
             return topk_probabilities.squeeze(0), indices.squeeze(0)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}(\nmodel={self.model}\noptimizer={self.optimizer}\ncriterion={self.criterion})"
