@@ -12,6 +12,18 @@ from learning.metrics import Metric
 
 
 @dataclass
+class Config:
+    batch_size: int
+    sequence_length: int
+    embedding_size: int
+    head_size: int
+    epochs: int
+    learning_rate: float
+    patience: int | None
+    min_delta: float | None
+
+
+@dataclass
 class BatchResult:
     outputs: torch.Tensor
     labels: torch.Tensor

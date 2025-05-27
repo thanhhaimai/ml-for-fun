@@ -1,38 +1,147 @@
+import math
 from dataclasses import dataclass
 from typing import Self
 
 import torch
+import torch.nn.functional as F
 from torch import nn, optim
 
 from learning.learner import BatchResult, Learner
 from learning.shakespeare_generator.shakespeare_dataset import Sample
 
 
+def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
+    if tensor.shape != shape:
+        raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
+
+
+class AttentionHead(nn.Module):
+    def __init__(self, sequence_length: int, embedding_size: int, head_size: int):
+        super().__init__()
+        self.sequence_length = sequence_length
+        self.embedding_size = embedding_size
+        self.head_size = head_size
+
+        self.query = nn.Linear(embedding_size, head_size, bias=False)
+        self.key = nn.Linear(embedding_size, head_size, bias=False)
+        self.value = nn.Linear(embedding_size, head_size, bias=False)
+
+        self.tril: torch.Tensor
+        self.register_buffer(
+            "tril", torch.tril(torch.ones(sequence_length, sequence_length))
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, S, E]
+        return: [B, S, H] -- NOTE: this is not E
+        """
+        H = self.head_size
+
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        # shape: [B, S, H]
+        query = self.query(x)
+        assert_shape("query", query, (B, S, H))
+
+        # shape: [B, S, H]
+        key = self.key(x)
+        assert_shape("key", key, (B, S, H))
+
+        # shape: [B, S, H]
+        value = self.value(x)
+        assert_shape("value", value, (B, S, H))
+
+        # shape: [B, S, H] @ [B, H, S] -> [B, S, S]
+        attention = query @ key.transpose(-2, -1) * (self.head_size**-0.5)
+        attention = attention.masked_fill(self.tril[:S, :S] == 0, -math.inf)
+        attention = F.softmax(attention, dim=-1)
+        assert_shape("attention", attention, (B, S, S))
+
+        # shape: [B, S, S] @ [B, S, H] -> [B, S, H]
+        output = attention @ value
+        assert_shape("output", output, (B, S, H))
+        return output
+
+
 class ShakespeareGenerator(nn.Module):
     def __init__(
         self,
-        input_size: int,
-        padding_idx: int,
+        vocab_size: int,
+        sequence_length: int,
+        embedding_size: int,
+        head_size: int,
         device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
         self.device = device
-        self.input_size = input_size
+        self.vocab_size = vocab_size
+        self.sequence_length = sequence_length
+        self.embedding_size = embedding_size
+        self.head_size = head_size
+
+        # [B, S] of vocab index -> [B, S, E]
         self.embedding = nn.Embedding(
-            num_embeddings=input_size,
-            embedding_dim=input_size,
-            padding_idx=padding_idx,
+            num_embeddings=vocab_size,
+            embedding_dim=embedding_size,
             device=device,
         )
+
+        # [B, S] of positional index -> [B, S, E]
+        self.positional_embedding = nn.Embedding(
+            num_embeddings=sequence_length,
+            embedding_dim=embedding_size,
+            device=device,
+        )
+
+        # [B, S, E] -> [B, S, H]
+        self.head = AttentionHead(
+            sequence_length=sequence_length,
+            embedding_size=embedding_size,
+            head_size=head_size,
+        )
+
+        # [B, S, H] -> [B, S, V]
+        self.linear = nn.Linear(head_size, vocab_size)
+
+        self.positional_indices: torch.Tensor
+        self.register_buffer("positional_indices", torch.arange(sequence_length))
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
         indices: [B, S]
         """
-        # embedding: [V, V]
-        # indices: [B, S] -- advance indexing, replace the first V shape with [B, S]
-        # output: [B, S, V]
-        output = self.embedding(indices)
+        E = self.embedding_size
+        H = self.head_size
+        V = self.vocab_size
+
+        B, S = indices.shape
+        assert_shape("indices", indices, (B, S))
+
+        # shape: [B, S, E]
+        tokens_embedding = self.embedding(indices)
+        assert_shape("tokens_embedding", tokens_embedding, (B, S, E))
+
+        # shape: [B, S]
+        positional_indices = self.positional_indices[:S].expand(B, -1)
+        assert_shape("positional_indices", positional_indices, (B, S))
+
+        # shape: [B, S, E]
+        positional_embedding = self.positional_embedding(positional_indices)
+        assert_shape("positional_embedding", positional_embedding, (B, S, E))
+
+        # shape: [B, S, E]
+        embedding = tokens_embedding + positional_embedding
+        assert_shape("embedding", embedding, (B, S, E))
+
+        # shape: [B, S, H]
+        output = self.head(embedding)
+        assert_shape("output", output, (B, S, H))
+
+        # shape: [B, S, V]
+        output = self.linear(output)
+        assert_shape("output", output, (B, S, V))
         return output
 
     def generate(self, indices: torch.Tensor, max_length: int) -> torch.Tensor:
@@ -40,46 +149,31 @@ class ShakespeareGenerator(nn.Module):
         indices: [B, S] -- the batched sequence of indices
         return: [B, S + max_length] -- after generated max_length tokens
         """
-        V = self.input_size
+        V = self.vocab_size
         for _ in range(max_length):
-            B, S = indices.shape
+            cropped_indices = indices[:, -self.sequence_length :]
+            B, S = cropped_indices.shape
+
             # shape: [B, S, V]
-            output = self(indices)
-            # print(output.shape)
-            if output.shape != (B, S, V):
-                raise ValueError(
-                    f"Invalid {output.shape=}, expected: ({B=}, {S=}, {V=})"
-                )
+            output = self(cropped_indices)
+            assert_shape("output", output, (B, S, V))
 
             # shape: [B, V]
             last_output = output[:, -1, :]
-            # print(last_output.shape)
-            if last_output.shape != (B, V):
-                raise ValueError(
-                    f"Invalid {last_output.shape=}, expected: ({B=}, {V=})"
-                )
+            assert_shape("last_output", last_output, (B, V))
 
             # shape: [B, V]
             probs = torch.softmax(last_output, dim=-1)
-            # print(probs.shape)
-            if probs.shape != (B, V):
-                raise ValueError(f"Invalid {probs.shape=}, expected: ({B=}, {V=})")
+            assert_shape("probs", probs, (B, V))
 
             # shape: [B, 1]
             next_token_indices = torch.multinomial(probs, num_samples=1)
-            # print(next_token_indices.shape)
-            if next_token_indices.shape != (B, 1):
-                raise ValueError(
-                    f"Invalid {next_token_indices.shape=}, expected: ({B=}, 1)"
-                )
+            assert_shape("next_token_indices", next_token_indices, (B, 1))
 
             # shape: [B, S + 1]
+            original_S = indices.shape[1]
             indices = torch.cat([indices, next_token_indices], dim=-1)
-            # print(indices.shape)
-            if indices.shape != (B, S + 1):
-                raise ValueError(
-                    f"Invalid {indices.shape=}, expected: ({B=}, {S + 1=})"
-                )
+            assert_shape("indices", indices, (B, original_S + 1))
 
         return indices
 
@@ -107,22 +201,19 @@ class ParallelBatchLearner(Learner[Batch]):
     def batch_step(self, batch: Batch) -> BatchResult:
         B = len(batch.samples)
         S = batch.samples[0].input.shape[0]
-        V = self.model.input_size
+        V = self.model.vocab_size
 
         # shape: [B, S]
         inputs = torch.stack([sample.input for sample in batch.samples], dim=0)
-        if inputs.shape != (B, S):
-            raise ValueError(f"Invalid {inputs.shape=}, expected: ({B=}, {S=})")
+        assert_shape("inputs", inputs, (B, S))
 
         # shape: [B, S]
         labels = torch.stack([sample.label for sample in batch.samples], dim=0)
-        if labels.shape != (B, S):
-            raise ValueError(f"Invalid {labels.shape=}, expected: ({B=}, {S=})")
+        assert_shape("labels", labels, (B, S))
 
         # shape: [B, S, V]
         outputs = self.model(inputs)
-        if outputs.shape != (B, S, V):
-            raise ValueError(f"Invalid {outputs.shape=}, expected: ({B=}, {S=}, {V=})")
+        assert_shape("outputs", outputs, (B, S, V))
 
         # `sum` mode
         batch_loss = self.criterion(outputs.view(B * S, V), labels.view(B * S))
