@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from torch import nn, optim
 
-from learning.learner import BatchResult, Learner
+from learning.learner import BatchResult, Config, Learner
 from learning.shakespeare_generator.shakespeare_dataset import Sample
 
 
@@ -16,25 +16,30 @@ def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
 
 
 class AttentionHead(nn.Module):
-    def __init__(self, sequence_length: int, embedding_size: int, head_size: int):
+    def __init__(self, config: Config):
         super().__init__()
-        self.sequence_length = sequence_length
-        self.embedding_size = embedding_size
-        self.head_size = head_size
+        if config.embedding_size % config.num_heads != 0:
+            raise ValueError(
+                f"Embedding size {config.embedding_size} must be divisible by number of heads {config.num_heads}"
+            )
+        self.head_size = config.embedding_size // config.num_heads
 
-        self.query = nn.Linear(embedding_size, head_size, bias=False)
-        self.key = nn.Linear(embedding_size, head_size, bias=False)
-        self.value = nn.Linear(embedding_size, head_size, bias=False)
+        self.query = nn.Linear(config.embedding_size, self.head_size, bias=False)
+        self.key = nn.Linear(config.embedding_size, self.head_size, bias=False)
+        self.value = nn.Linear(config.embedding_size, self.head_size, bias=False)
+
+        self.dropout = nn.Dropout(config.dropout)
 
         self.tril: torch.Tensor
         self.register_buffer(
-            "tril", torch.tril(torch.ones(sequence_length, sequence_length))
+            "tril",
+            torch.tril(torch.ones(config.sequence_length, config.sequence_length)),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: [B, S, E]
-        return: [B, S, H] -- NOTE: this is not E
+        return: [B, S, H] -- NOTE: this is H, not E
         """
         H = self.head_size
 
@@ -59,61 +64,153 @@ class AttentionHead(nn.Module):
         attention = F.softmax(attention, dim=-1)
         assert_shape("attention", attention, (B, S, S))
 
+        attention = self.dropout(attention)
+        assert_shape("attention", attention, (B, S, S))
+
         # shape: [B, S, S] @ [B, S, H] -> [B, S, H]
         output = attention @ value
         assert_shape("output", output, (B, S, H))
         return output
 
 
+class MultiHeadAttention(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.heads = nn.ModuleList(
+            [
+                AttentionHead(
+                    config,
+                )
+                for _ in range(config.num_heads)
+            ],
+        )
+        self.projection = nn.Linear(config.embedding_size, config.embedding_size)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, S, E]
+        return: [B, S, E]
+        """
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        # shape: [B, S, H * num_heads] = [B, S, E] since H = E // num_heads
+        output = torch.cat([head(x) for head in self.heads], dim=-1)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.projection(output)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.dropout(output)
+        assert_shape("output", output, (B, S, E))
+
+        return output
+
+
+class FeedForward(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.linear = nn.Linear(config.embedding_size, config.embedding_size)
+        self.gelu = nn.GELU()
+        self.projection = nn.Linear(config.embedding_size, config.embedding_size)
+        self.dropout = nn.Dropout(config.dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, S, E]
+        return: [B, S, E]
+        """
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        output = self.linear(x)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.gelu(output)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.projection(output)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.dropout(output)
+        assert_shape("output", output, (B, S, E))
+
+        return output
+
+
+class Block(nn.Module):
+    def __init__(self, config: Config):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(config.embedding_size)
+        self.heads = MultiHeadAttention(config)
+
+        self.norm2 = nn.LayerNorm(config.embedding_size)
+        self.feed_forward = FeedForward(config)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, S, E]
+        return: [B, S, E]
+        """
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        # shape: [B, S, E]
+        output = x + self.heads(self.norm1(x))
+        assert_shape("output", output, (B, S, E))
+
+        # shape: [B, S, E]
+        output = x + self.feed_forward(self.norm2(output))
+        assert_shape("output", output, (B, S, E))
+
+        return output
+
+
 class ShakespeareGenerator(nn.Module):
     def __init__(
         self,
+        config: Config,
         vocab_size: int,
-        sequence_length: int,
-        embedding_size: int,
-        head_size: int,
         device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
         self.device = device
+        self.sequence_length = config.sequence_length
         self.vocab_size = vocab_size
-        self.sequence_length = sequence_length
-        self.embedding_size = embedding_size
-        self.head_size = head_size
+        self.embedding_size = config.embedding_size
 
         # [B, S] of vocab index -> [B, S, E]
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size,
-            embedding_dim=embedding_size,
+            embedding_dim=config.embedding_size,
             device=device,
         )
 
         # [B, S] of positional index -> [B, S, E]
         self.positional_embedding = nn.Embedding(
-            num_embeddings=sequence_length,
-            embedding_dim=embedding_size,
+            num_embeddings=config.sequence_length,
+            embedding_dim=config.embedding_size,
             device=device,
         )
 
-        # [B, S, E] -> [B, S, H]
-        self.head = AttentionHead(
-            sequence_length=sequence_length,
-            embedding_size=embedding_size,
-            head_size=head_size,
+        # [B, S, E] -> [B, S, E]
+        self.blocks = nn.Sequential(
+            Block(config),
+            nn.LayerNorm(config.embedding_size),
         )
 
-        # [B, S, H] -> [B, S, V]
-        self.linear = nn.Linear(head_size, vocab_size)
+        # [B, S, E] -> [B, S, V]
+        self.linear = nn.Linear(config.embedding_size, vocab_size)
 
         self.positional_indices: torch.Tensor
-        self.register_buffer("positional_indices", torch.arange(sequence_length))
+        self.register_buffer("positional_indices", torch.arange(config.sequence_length))
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
         indices: [B, S]
         """
         E = self.embedding_size
-        H = self.head_size
         V = self.vocab_size
 
         B, S = indices.shape
@@ -135,12 +232,12 @@ class ShakespeareGenerator(nn.Module):
         embedding = tokens_embedding + positional_embedding
         assert_shape("embedding", embedding, (B, S, E))
 
-        # shape: [B, S, H]
-        output = self.head(embedding)
-        assert_shape("output", output, (B, S, H))
+        # shape: [B, S, E]
+        block_output = self.blocks(embedding)
+        assert_shape("block_output", block_output, (B, S, E))
 
         # shape: [B, S, V]
-        output = self.linear(output)
+        output = self.linear(block_output)
         assert_shape("output", output, (B, S, V))
         return output
 

@@ -16,8 +16,9 @@ class Config:
     batch_size: int
     sequence_length: int
     embedding_size: int
-    head_size: int
+    num_heads: int
     epochs: int
+    dropout: float
     learning_rate: float
     patience: int | None
     min_delta: float | None
