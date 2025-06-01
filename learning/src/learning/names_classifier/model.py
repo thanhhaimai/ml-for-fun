@@ -40,53 +40,11 @@ class Config:
     dropout: float = 0.1
 
 
-class NamesClassifierRNN(nn.Module):
-    """
-    V: input_size
-    H: hidden_size
-    C: output_size
-
-    S: sequence_length
-    B: batch_size
-    """
-
+class NamesClassifier(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
         self.V = config.vocab_size
         self.C = config.class_size
-        self.H = config.hidden_size
-        self.D = config.num_layers
-        if config.bidirectional:
-            self.D *= 2
-
-        # rnn: [S, B, V] -> hidden [L, B, H]
-        self.rnn = nn.RNN(
-            input_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            bidirectional=config.bidirectional,
-            nonlinearity=config.activation,
-            device=config.device,
-        )
-
-        # fc: [B, H] -> [B, C]
-        self.fc = nn.Linear(
-            in_features=config.hidden_size,
-            out_features=config.class_size,
-            device=config.device,
-        )
-
-    def forward(self, x: PackedSequence) -> torch.Tensor:
-        B = int(x.batch_sizes[0].item())
-        assert_shape("x", x.data, (x.data.shape[0], self.V))
-
-        # hidden: [D, B, H]
-        _rnn_output, hidden = self.rnn(x)
-        assert_shape("hidden", hidden, (self.D, B, self.H))
-
-        # output: [B, C]
-        output = self.fc(hidden[-1])
-        return output
 
     def predict_topk(
         self, x: torch.Tensor, k: int
@@ -128,18 +86,89 @@ class NamesClassifierRNN(nn.Module):
             return topk_logits.squeeze(0), indices.squeeze(0)
 
 
-class NamesClassifierLSTM(nn.Module):
+class NamesClassifierRNN(NamesClassifier):
     """
-    D: input_size
+    V: vocab_size
+    C: class_size
     H: hidden_size
-    C: output_size
+    D: num_layers
 
     S: sequence_length
-    N: batch_size
+    B: batch_size
     """
 
     def __init__(self, config: Config):
-        super().__init__()
+        super().__init__(config)
+        self.H = config.hidden_size
+        self.D = config.num_layers
+        self.bidirectional = config.bidirectional
+        if config.bidirectional:
+            self.D *= 2
+
+        # rnn: [S, B, V] -> hidden [D, B, H] or [D, B, H * 2]
+        self.rnn = nn.RNN(
+            input_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            bidirectional=config.bidirectional,
+            nonlinearity=config.activation,
+            device=config.device,
+        )
+
+        if self.bidirectional:
+            # fc: [B, H * 2] -> [B, C]
+            self.fc = nn.Linear(
+                in_features=config.hidden_size * 2,
+                out_features=config.class_size,
+                device=config.device,
+            )
+        else:
+            # fc: [B, H] -> [B, C]
+            self.fc = nn.Linear(
+                in_features=config.hidden_size,
+                out_features=config.class_size,
+                device=config.device,
+            )
+
+    def forward(self, x: PackedSequence) -> torch.Tensor:
+        B = int(x.batch_sizes[0].item())
+        assert_shape("x", x.data, (x.data.shape[0], self.V))
+
+        # hidden: [D, B, H] or [D, B, H * 2]
+        _rnn_output, hidden = self.rnn(x)
+        assert_shape("hidden", hidden, (self.D, B, self.H))
+
+        if self.bidirectional:
+            # NOTE: basic indexing removes the `D` dimension
+            hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)
+            assert_shape("hidden", hidden, (B, self.H * 2))
+        else:
+            # NOTE: basic indexing removes the `D` dimension
+            hidden = hidden[-1]
+            assert_shape("hidden", hidden, (B, self.H))
+
+        # output: [B, C]
+        output = self.fc(hidden)
+        return output
+
+
+class NamesClassifierLSTM(NamesClassifier):
+    """
+    V: vocab_size
+    C: class_size
+    H: hidden_size
+    D: num_layers
+
+    S: sequence_length
+    B: batch_size
+    """
+
+    def __init__(self, config: Config):
+        super().__init__(config)
+        self.H = config.hidden_size
+        self.D = config.num_layers
+        if config.bidirectional:
+            self.D *= 2
 
         # num_layers * num_directions == 4
         # lstm: [S, N, D] -> hidden [4, N, H]

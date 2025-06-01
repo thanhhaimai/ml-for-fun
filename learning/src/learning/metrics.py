@@ -149,7 +149,7 @@ class ConfusionMatrixMetric(Metric):
             format = "d"
 
         sns.heatmap(
-            data=matrix,
+            data=matrix.cpu(),
             annot=True,
             fmt=format,
             ax=ax,
@@ -161,13 +161,13 @@ class ConfusionMatrixMetric(Metric):
         ax.set_yticklabels(self.classes, rotation=0)
 
     def plot_accuracies(self, ax: matplotlib.axes.Axes, label: str):
-        ax.plot(self.accuracies, label=label)
+        ax.plot(self.accuracies.cpu(), label=label)
         ax.set_xlabel("Epoch")
         ax.set_ylabel("Accuracy")
         ax.legend()
 
     def plot_class_precisions(self, ax: matplotlib.axes.Axes, label: str):
-        ax.plot(self.class_precisions, marker="o", label=label)
+        ax.plot(self.class_precisions.cpu(), marker="o", label=label)
         ax.set_xlabel("Class")
         ax.set_ylabel("Precision")
         ax.set_xticks(range(len(self.classes)))
@@ -175,7 +175,7 @@ class ConfusionMatrixMetric(Metric):
         ax.legend()
 
     def plot_class_recalls(self, ax: matplotlib.axes.Axes, label: str):
-        ax.plot(self.class_recalls, marker="o", label=label)
+        ax.plot(self.class_recalls.cpu(), marker="o", label=label)
         ax.set_xlabel("Class")
         ax.set_ylabel("Recall")
         ax.set_xticks(range(len(self.classes)))
@@ -183,7 +183,7 @@ class ConfusionMatrixMetric(Metric):
         ax.legend()
 
     def plot_class_f1_scores(self, ax: matplotlib.axes.Axes, label: str):
-        ax.plot(self.class_f1_scores, marker="o", label=label)
+        ax.plot(self.class_f1_scores.cpu(), marker="o", label=label)
         ax.set_xlabel("Class")
         ax.set_ylabel("F1 Score")
         ax.set_xticks(range(len(self.classes)))

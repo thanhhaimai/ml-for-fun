@@ -173,3 +173,11 @@ Trying `cuda` with a different seed=52
 Early stopping at epoch 83 best_eval_loss=0.8350
 Training completed. Elapsed time: 8.01s
 ```
+
+BUG: `bidirectional` wasn't working. Fixed and use `bidrectional=True` on `cuda` with `seed=42`
+
+```python
+88/500 -- 0.12s  Train loss  0.5794  Eval loss  0.8200  
+Early stopping at epoch 88 best_eval_loss=0.7680
+Training completed. Elapsed time: 11.04s
+```
