@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Generic, TypeVar
 
 import torch
+import torchinfo
 from torch import nn, optim
 from torch.utils.data import DataLoader
 
@@ -156,4 +157,10 @@ class Learner(Generic[BatchT]):
         return train_losses, eval_losses
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}(\nmodel={self.model}\noptimizer={self.optimizer}\ncriterion={self.criterion})"
+        return (
+            f"{self.__class__.__name__}"
+            f"\nmodel={self.model}"
+            f"\n{torchinfo.summary(self.model)}"
+            f"\noptimizer={self.optimizer}"
+            f"\ncriterion={self.criterion}"
+        )
