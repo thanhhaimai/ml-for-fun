@@ -16,7 +16,7 @@ class NameSample:
     C: num_classes
     """
 
-    # shape: [S, V] -- one-hot encoded sequence
+    # shape: [S] -- indices of the tokens in the vocabulary
     input: torch.Tensor
     # shape: [1] -- class index
     label: torch.Tensor
@@ -45,7 +45,7 @@ class NamesClassifierDataset(Dataset[NameSample]):
                 device=device,
             )
             for name in names:
-                input = tokenizer.to_one_hot(name, device=device)
+                input = torch.tensor(tokenizer.t2i(name), device=device)
                 self.samples.append(NameSample(input=input, label=label))
 
     def __len__(self) -> int:

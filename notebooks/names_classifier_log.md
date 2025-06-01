@@ -316,3 +316,54 @@ Result: Takes more time to run, but better result.
 Early stopping at epoch 115 best_eval_loss=0.7187
 Training completed. Elapsed time: 32.82s
 ```
+
+## 5: Use Embedding with simple RNN
+
+```python
+Config(batch_size=1024, learning_rate=0.001, epochs=500, patience=30, min_delta=0.0001, device=device(type='cuda'), vocab_size=58, class_size=18, embedding_size=32, hidden_size=64, num_layers=2, bidirectional=True, activation='relu', dropout=0.2)
+ParallelBatchLearner
+model=NamesClassifierRNN(
+  (embedding): Embedding(58, 32, padding_idx=0)
+  (ln1): LayerNorm((32,), eps=1e-05, elementwise_affine=True)
+  (rnn): RNN(32, 64, num_layers=2, batch_first=True, dropout=0.2, bidirectional=True)
+  (ln2): LayerNorm((128,), eps=1e-05, elementwise_affine=True)
+  (fc): Linear(in_features=128, out_features=18, bias=True)
+)
+=================================================================
+Layer (type:depth-idx)                   Param #
+=================================================================
+NamesClassifierRNN                       --
+├─Embedding: 1-1                         1,856
+├─LayerNorm: 1-2                         64
+├─RNN: 1-3                               37,376
+├─LayerNorm: 1-4                         256
+├─Linear: 1-5                            2,322
+=================================================================
+Total params: 41,874
+Trainable params: 41,874
+Non-trainable params: 0
+=================================================================
+optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: True
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.01
+)
+criterion=CrossEntropyLoss()
+```
+
+Result:
+
+```python
+79/500 -- 0.13s  Train loss  0.4881  Eval loss  0.8062  
+Early stopping at epoch 79 best_eval_loss=0.7303
+Training completed. Elapsed time: 10.52s
+```
