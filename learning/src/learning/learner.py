@@ -22,6 +22,7 @@ class Config:
     learning_rate: float
     patience: int | None
     min_delta: float | None
+    device: torch.device
 
 
 @dataclass

@@ -297,3 +297,46 @@ Result: may not finish hahaha. Runs very slow, but it learns so well!
 1/100 -- 354.38s 	Train loss 	1.9703 	Eval loss 	1.8294 	<<
 2/100 -- 355.16s 	Train loss 	1.8667 	Eval loss 	1.7627 	<<
 ```
+
+## Switch to Desktop
+
+1080 Ti
+
+```
+Config(batch_size=1024, sequence_length=8, embedding_size=32, num_heads=4, epochs=100, dropout=0.1, learning_rate=0.001, patience=30, min_delta=0.001)
+model=ShakespeareGenerator(
+  (embedding): Embedding(66, 32)
+  (positional_embedding): Embedding(8, 32)
+  (blocks): Sequential(
+    (0): Block(
+      (norm1): LayerNorm((32,), eps=1e-05, elementwise_affine=True)
+      (heads): MultiHeadAttention(
+        (heads): ModuleList(
+          (0-3): 4 x AttentionHead(
+            (query): Linear(in_features=32, out_features=8, bias=False)
+            (key): Linear(in_features=32, out_features=8, bias=False)
+            (value): Linear(in_features=32, out_features=8, bias=False)
+            (dropout): Dropout(p=0.1, inplace=False)
+          )
+        )
+        (projection): Linear(in_features=32, out_features=32, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (norm2): LayerNorm((32,), eps=1e-05, elementwise_affine=True)
+      (feed_forward): FeedForward(
+        (linear): Linear(in_features=32, out_features=32, bias=True)
+        (gelu): GELU(approximate='none')
+        (projection): Linear(in_features=32, out_features=32, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+    )
+    (1): LayerNorm((32,), eps=1e-05, elementwise_affine=True)
+  )
+  (linear): Linear(in_features=32, out_features=66, bias=True)
+)
+```
+
+Result: Nice, faster!
+```
+0/100 -- 4.43s 	Train loss 	2.5861 	Eval loss 	2.2469 	<<
+```

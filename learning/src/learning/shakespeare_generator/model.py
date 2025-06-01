@@ -24,16 +24,37 @@ class AttentionHead(nn.Module):
             )
         self.head_size = config.embedding_size // config.num_heads
 
-        self.query = nn.Linear(config.embedding_size, self.head_size, bias=False)
-        self.key = nn.Linear(config.embedding_size, self.head_size, bias=False)
-        self.value = nn.Linear(config.embedding_size, self.head_size, bias=False)
+        self.query = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
+        self.key = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
+        self.value = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
 
         self.dropout = nn.Dropout(config.dropout)
 
         self.tril: torch.Tensor
         self.register_buffer(
             "tril",
-            torch.tril(torch.ones(config.sequence_length, config.sequence_length)),
+            torch.tril(
+                torch.ones(
+                    config.sequence_length,
+                    config.sequence_length,
+                    device=config.device,
+                ),
+            ),
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -84,7 +105,11 @@ class MultiHeadAttention(nn.Module):
                 for _ in range(config.num_heads)
             ],
         )
-        self.projection = nn.Linear(config.embedding_size, config.embedding_size)
+        self.projection = nn.Linear(
+            config.embedding_size,
+            config.embedding_size,
+            device=config.device,
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -111,9 +136,17 @@ class MultiHeadAttention(nn.Module):
 class FeedForward(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
-        self.linear = nn.Linear(config.embedding_size, config.embedding_size)
+        self.linear = nn.Linear(
+            config.embedding_size,
+            config.embedding_size,
+            device=config.device,
+        )
         self.gelu = nn.GELU()
-        self.projection = nn.Linear(config.embedding_size, config.embedding_size)
+        self.projection = nn.Linear(
+            config.embedding_size,
+            config.embedding_size,
+            device=config.device,
+        )
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -142,10 +175,16 @@ class FeedForward(nn.Module):
 class Block(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
-        self.norm1 = nn.LayerNorm(config.embedding_size)
+        self.norm1 = nn.LayerNorm(
+            config.embedding_size,
+            device=config.device,
+        )
         self.heads = MultiHeadAttention(config)
 
-        self.norm2 = nn.LayerNorm(config.embedding_size)
+        self.norm2 = nn.LayerNorm(
+            config.embedding_size,
+            device=config.device,
+        )
         self.feed_forward = FeedForward(config)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -172,10 +211,8 @@ class ShakespeareGenerator(nn.Module):
         self,
         config: Config,
         vocab_size: int,
-        device: torch.device = torch.device("cpu"),
     ):
         super().__init__()
-        self.device = device
         self.sequence_length = config.sequence_length
         self.vocab_size = vocab_size
         self.embedding_size = config.embedding_size
@@ -184,27 +221,40 @@ class ShakespeareGenerator(nn.Module):
         self.embedding = nn.Embedding(
             num_embeddings=vocab_size,
             embedding_dim=config.embedding_size,
-            device=device,
+            device=config.device,
         )
 
         # [B, S] of positional index -> [B, S, E]
         self.positional_embedding = nn.Embedding(
             num_embeddings=config.sequence_length,
             embedding_dim=config.embedding_size,
-            device=device,
+            device=config.device,
         )
 
         # [B, S, E] -> [B, S, E]
         self.blocks = nn.Sequential(
             Block(config),
-            nn.LayerNorm(config.embedding_size),
+            nn.LayerNorm(
+                config.embedding_size,
+                device=config.device,
+            ),
         )
 
         # [B, S, E] -> [B, S, V]
-        self.linear = nn.Linear(config.embedding_size, vocab_size)
+        self.linear = nn.Linear(
+            config.embedding_size,
+            vocab_size,
+            device=config.device,
+        )
 
         self.positional_indices: torch.Tensor
-        self.register_buffer("positional_indices", torch.arange(config.sequence_length))
+        self.register_buffer(
+            "positional_indices",
+            torch.arange(
+                config.sequence_length,
+                device=config.device,
+            ),
+        )
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
@@ -264,7 +314,7 @@ class ShakespeareGenerator(nn.Module):
             assert_shape("probs", probs, (B, V))
 
             # shape: [B, 1]
-            next_token_indices = torch.multinomial(probs, num_samples=1)
+            next_token_indices = probs.multinomial(num_samples=1)
             assert_shape("next_token_indices", next_token_indices, (B, 1))
 
             # shape: [B, S + 1]
