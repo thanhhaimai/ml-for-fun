@@ -6,13 +6,27 @@ import torch
 import torch.nn.functional as F
 from torch import nn, optim
 
-from learning.learner import BatchResult, Config, Learner
+from learning.learner import BatchResult, Learner
 from learning.shakespeare_generator.shakespeare_dataset import Sample
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
     if tensor.shape != shape:
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
+
+
+@dataclass
+class Config:
+    batch_size: int
+    sequence_length: int
+    embedding_size: int
+    num_heads: int
+    epochs: int
+    dropout: float
+    learning_rate: float
+    patience: int | None
+    min_delta: float | None
+    device: torch.device
 
 
 class AttentionHead(nn.Module):
