@@ -97,7 +97,7 @@ Training completed. Elapsed time: 30.95s
 
 BUG: found a bug, `dropout` was not effective. All runs above were with `dropout=0`
 
-[BEST] With `dropout=1`. Seems like we are now in the high bias zone.
+With `dropout=1`. Seems like we are now in the high bias zone.
 
 ```python
 114/500 -- 0.18s  Train loss  0.8196  Eval loss  0.7435  
@@ -366,4 +366,28 @@ Result:
 79/500 -- 0.13s  Train loss  0.4881  Eval loss  0.8062  
 Early stopping at epoch 79 best_eval_loss=0.7303
 Training completed. Elapsed time: 10.52s
+```
+
+Use LSTM
+
+```python
+73/500 -- 0.19s  Train loss  0.2278  Eval loss  0.8273  
+Early stopping at epoch 73 best_eval_loss=0.6913
+Training completed. Elapsed time: 14.46s
+```
+
+[BEST] Use GRU
+
+```python
+75/500 -- 0.19s  Train loss  0.2721  Eval loss  0.7809  
+Early stopping at epoch 75 best_eval_loss=0.6728
+Training completed. Elapsed time: 14.29s
+```
+
+Reduce `hidden_size=32`
+
+```python
+94/500 -- 0.14s  Train loss  0.4863  Eval loss  0.7247  
+Early stopping at epoch 94 best_eval_loss=0.6862
+Training completed. Elapsed time: 13.10s
 ```
