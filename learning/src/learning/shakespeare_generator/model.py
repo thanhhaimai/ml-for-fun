@@ -296,6 +296,7 @@ class ShakespeareGenerator(nn.Module):
         indices: [B, S] -- the batched sequence of indices
         return: [B, S + max_length] -- after generated max_length tokens
         """
+        self.eval()
         V = self.vocab_size
         for _ in range(max_length):
             cropped_indices = indices[:, -self.sequence_length :]
@@ -340,8 +341,9 @@ class ParallelBatchLearner(Learner[Batch]):
         model: ShakespeareGenerator,
         optimizer: optim.Optimizer,
         criterion: nn.Module,
+        device: torch.device,
     ):
-        super().__init__(model, optimizer, criterion)
+        super().__init__(model, optimizer, criterion, device)
         self.model = model
         assert self.criterion.reduction == "sum", "Reduction must be 'sum'"
 
