@@ -271,3 +271,48 @@ Result:
 Early stopping at epoch 91 best_eval_loss=0.7608
 Training completed. Elapsed time: 11.75s
 ```
+
+## 4: Use GRU
+
+```python
+Config(batch_size=1024, learning_rate=0.001, epochs=500, patience=30, min_delta=0.0001, device=device(type='cuda'), vocab_size=58, class_size=18, hidden_size=64, num_layers=2, bidirectional=True, activation='relu', dropout=0.2)
+ParallelBatchLearner
+model=NamesClassifierGRU(
+  (gru): GRU(58, 64, num_layers=2, dropout=0.2, bidirectional=True)
+  (fc): Linear(in_features=128, out_features=18, bias=True)
+)
+=================================================================
+Layer (type:depth-idx)                   Param #
+=================================================================
+NamesClassifierGRU                       --
+├─GRU: 1-1                               122,112
+├─Linear: 1-2                            2,322
+=================================================================
+Total params: 124,434
+Trainable params: 124,434
+Non-trainable params: 0
+=================================================================
+optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: True
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.01
+)
+criterion=CrossEntropyLoss()
+```
+
+Result: Takes more time to run, but better result.
+
+```python
+115/500 -- 0.28s  Train loss  0.3661  Eval loss  0.7808  
+Early stopping at epoch 115 best_eval_loss=0.7187
+Training completed. Elapsed time: 32.82s
+```
