@@ -181,3 +181,93 @@ BUG: `bidirectional` wasn't working. Fixed and use `bidrectional=True` on `cuda`
 Early stopping at epoch 88 best_eval_loss=0.7680
 Training completed. Elapsed time: 11.04s
 ```
+
+## 3: Use LSTM
+
+```python
+Config(batch_size=1024, learning_rate=0.001, epochs=500, patience=30, min_delta=0.0001, device=device(type='cuda'), vocab_size=58, class_size=18, hidden_size=64, num_layers=2, bidirectional=True, activation='relu', dropout=0.2)
+ParallelBatchLearner
+model=NamesClassifierLSTM(
+  (lstm): LSTM(58, 64, num_layers=2, dropout=0.2, bidirectional=True)
+  (fc): Linear(in_features=128, out_features=18, bias=True)
+)
+=================================================================
+Layer (type:depth-idx)                   Param #
+=================================================================
+NamesClassifierLSTM                      --
+├─LSTM: 1-1                              162,816
+├─Linear: 1-2                            2,322
+=================================================================
+Total params: 165,138
+Trainable params: 165,138
+Non-trainable params: 0
+=================================================================
+optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: True
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.01
+)
+criterion=CrossEntropyLoss()
+```
+
+Result:
+
+```python
+114/500 -- 0.16s  Train loss  0.5309  Eval loss  0.8451  
+Early stopping at epoch 114 best_eval_loss=0.7948
+Training completed. Elapsed time: 18.47s
+```
+
+For comparision, this is the RNN run:
+
+```python
+Config(batch_size=1024, learning_rate=0.001, epochs=500, patience=30, min_delta=0.0001, device=device(type='cuda'), vocab_size=58, class_size=18, hidden_size=64, num_layers=2, bidirectional=True, activation='relu', dropout=0.2)
+ParallelBatchLearner
+model=NamesClassifierRNN(
+  (rnn): RNN(58, 64, num_layers=2, dropout=0.2, bidirectional=True)
+  (fc): Linear(in_features=128, out_features=18, bias=True)
+)
+=================================================================
+Layer (type:depth-idx)                   Param #
+=================================================================
+NamesClassifierRNN                       --
+├─RNN: 1-1                               40,704
+├─Linear: 1-2                            2,322
+=================================================================
+Total params: 43,026
+Trainable params: 43,026
+Non-trainable params: 0
+=================================================================
+optimizer=AdamW (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: True
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0.01
+)
+criterion=CrossEntropyLoss()
+```
+
+Result:
+
+```python
+91/500 -- 0.13s  Train loss  0.6071  Eval loss  0.7991  
+Early stopping at epoch 91 best_eval_loss=0.7608
+Training completed. Elapsed time: 11.75s
+```

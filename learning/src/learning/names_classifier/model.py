@@ -109,9 +109,11 @@ class NamesClassifierRNN(NamesClassifier):
         self.rnn = nn.RNN(
             input_size=config.vocab_size,
             hidden_size=config.hidden_size,
+            batch_first=False,
             num_layers=config.num_layers,
             bidirectional=config.bidirectional,
             nonlinearity=config.activation,
+            dropout=config.dropout,
             device=config.device,
         )
 
@@ -167,48 +169,54 @@ class NamesClassifierLSTM(NamesClassifier):
         super().__init__(config)
         self.H = config.hidden_size
         self.D = config.num_layers
+        self.bidirectional = config.bidirectional
         if config.bidirectional:
             self.D *= 2
 
-        # num_layers * num_directions == 4
-        # lstm: [S, N, D] -> hidden [4, N, H]
-        # Need to concatenate the last 2 hidden states since this is a bidirectional LSTM
-        # hidden: [4, N, H] -> [N, H * 2]
+        # lstm: [S, B, V] -> hidden [D, B, H] or [D, B, H * 2]
         self.lstm = nn.LSTM(
             input_size=config.vocab_size,
             hidden_size=config.hidden_size,
             batch_first=False,
-            num_layers=1,
-            bidirectional=True,
+            num_layers=config.num_layers,
+            bidirectional=config.bidirectional,
+            dropout=config.dropout,
+            device=config.device,
         )
 
-        self.ln1 = nn.LayerNorm(config.hidden_size * 2)
+        if self.bidirectional:
+            # fc: [B, H * 2] -> [B, C]
+            self.fc = nn.Linear(
+                in_features=config.hidden_size * 2,
+                out_features=config.class_size,
+                device=config.device,
+            )
+        else:
+            # fc: [B, H] -> [B, C]
+            self.fc = nn.Linear(
+                in_features=config.hidden_size,
+                out_features=config.class_size,
+                device=config.device,
+            )
 
-        # dropout: [N, H * 2] -> [N, H * 2]
-        self.dropout = nn.Dropout(p=config.dropout)
+    def forward(self, x: PackedSequence) -> torch.Tensor:
+        B = int(x.batch_sizes[0].item())
+        assert_shape("x", x.data, (x.data.shape[0], self.V))
 
-        # fc: [N, H * 2] -> [N, C]
-        self.fc = nn.Linear(config.hidden_size * 2, config.class_size)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x: shape [S, N, D]
-        """
-
-        # hidden: [num_layers * num_directions, N, H]
+        # hidden: [D, B, H] or [D, B, H * 2]
         _lstm_output, (hidden, _cell) = self.lstm(x)
 
-        # bidirectional_hidden_state: [N, H * 2]
-        bidirectional_hidden_state = torch.cat((hidden[-2], hidden[-1]), dim=1)
+        if self.bidirectional:
+            # NOTE: basic indexing removes the `D` dimension
+            hidden = torch.cat((hidden[-2], hidden[-1]), dim=1)
+            assert_shape("hidden", hidden, (B, self.H * 2))
+        else:
+            # NOTE: basic indexing removes the `D` dimension
+            hidden = hidden[-1]
+            assert_shape("hidden", hidden, (B, self.H))
 
-        # Apply LayerNorm
-        normalized_hidden_state = self.ln1(bidirectional_hidden_state)
-
-        # dropout_output: [N, H * 2]
-        dropout_output = self.dropout(normalized_hidden_state)
-
-        # output: [N, C]
-        output = self.fc(dropout_output)
+        # output: [B, C]
+        output = self.fc(hidden)
         return output
 
 
