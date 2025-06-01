@@ -39,8 +39,7 @@ def test_basic(test_dir, tokenizer: Tokenizer):
     sample = dataset[0]
     assert isinstance(sample, NameSample)
     assert sample.label.shape == (1,)
-    assert sample.input.shape[1] == 1
-    assert sample.input.shape[2] == ds.tokenizer.vocab_size
+    assert sample.input.shape == (4, ds.tokenizer.vocab_size)
 
 
 def test_out_of_range(test_dir, tokenizer: Tokenizer):

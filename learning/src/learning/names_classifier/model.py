@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Self
+from typing import Literal, Self
 
 import torch
 from torch import nn, optim
@@ -9,35 +9,123 @@ from learning.learner import BatchResult, Learner
 from learning.names_classifier.names_classifier_dataset import NameSample
 
 
+def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
+    if tensor.shape != shape:
+        raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
+
+
+@dataclass
+class Config:
+    # Training parameters
+    batch_size: int
+    learning_rate: float
+    epochs: int
+    patience: int | None
+    min_delta: float | None
+    device: torch.device
+
+    # The number of tokens
+    vocab_size: int
+    # The number of countries class
+    class_size: int
+    # The number of hidden units
+    hidden_size: int
+    # The number of layers
+    num_layers: int = 1
+    # Whether the network is bidirectional
+    bidirectional: bool = False
+    # The activation function, either "tanh" or "relu"
+    activation: Literal["tanh", "relu"] = "tanh"
+    # The dropout rate
+    dropout: float = 0.1
+
+
 class NamesClassifierRNN(nn.Module):
     """
-    D: input_size
+    V: input_size
     H: hidden_size
     C: output_size
 
     S: sequence_length
-    N: batch_size
+    B: batch_size
     """
 
-    def __init__(self, input_size, hidden_size, output_size):
+    def __init__(self, config: Config):
         super().__init__()
+        self.V = config.vocab_size
+        self.C = config.class_size
+        self.H = config.hidden_size
+        self.D = config.num_layers
+        if config.bidirectional:
+            self.D *= 2
 
-        # rnn: [S, N, D] -> hidden [N, H]
-        self.rnn = nn.RNN(input_size=input_size, hidden_size=hidden_size)
+        # rnn: [S, B, V] -> hidden [L, B, H]
+        self.rnn = nn.RNN(
+            input_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            bidirectional=config.bidirectional,
+            nonlinearity=config.activation,
+            device=config.device,
+        )
 
-        # fc: [N, H] -> [N, C]
-        self.fc = nn.Linear(hidden_size, output_size)
+        # fc: [B, H] -> [B, C]
+        self.fc = nn.Linear(
+            in_features=config.hidden_size,
+            out_features=config.class_size,
+            device=config.device,
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        x: shape [S, N, D]
-        """
-        # hidden: [N, H]
+    def forward(self, x: PackedSequence) -> torch.Tensor:
+        B = int(x.batch_sizes[0].item())
+        assert_shape("x", x.data, (x.data.shape[0], self.V))
+
+        # hidden: [D, B, H]
         _rnn_output, hidden = self.rnn(x)
+        assert_shape("hidden", hidden, (self.D, B, self.H))
 
-        # output: [N, C]
-        output = self.fc(hidden[0])
+        # output: [B, C]
+        output = self.fc(hidden[-1])
         return output
+
+    def predict_topk(
+        self, x: torch.Tensor, k: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        x: shape [S, V]
+        """
+        self.eval()
+        with torch.no_grad():
+            S = x.shape[0]
+            assert_shape("x", x, (S, self.V))
+
+            # padded_input: [S, 1, V]
+            padded_input = pad_sequence([x], batch_first=False)
+            assert_shape("padded_input", padded_input, (S, 1, self.V))
+
+            # packed_input: [S, 1, V]
+            packed_input = pack_padded_sequence(
+                input=padded_input,
+                lengths=[S],
+                batch_first=False,
+                enforce_sorted=True,
+            )
+
+            # output: [1, C]
+            output = self(packed_input)
+            assert_shape("output", output, (1, self.C))
+
+            # probabilities: [1, C]
+            probabilities = torch.softmax(output, dim=-1)
+            assert_shape("probabilities", probabilities, (1, self.C))
+
+            # topk_logits: [1, K]
+            # indices: [1, K]
+            topk_logits, indices = torch.topk(probabilities, k=k, dim=-1)
+            assert_shape("topk_logits", topk_logits, (1, k))
+            assert_shape("indices", indices, (1, k))
+
+            return topk_logits.squeeze(0), indices.squeeze(0)
 
 
 class NamesClassifierLSTM(nn.Module):
@@ -50,7 +138,7 @@ class NamesClassifierLSTM(nn.Module):
     N: batch_size
     """
 
-    def __init__(self, input_size, hidden_size, output_size, dropout):
+    def __init__(self, config: Config):
         super().__init__()
 
         # num_layers * num_directions == 4
@@ -58,20 +146,20 @@ class NamesClassifierLSTM(nn.Module):
         # Need to concatenate the last 2 hidden states since this is a bidirectional LSTM
         # hidden: [4, N, H] -> [N, H * 2]
         self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
+            input_size=config.vocab_size,
+            hidden_size=config.hidden_size,
             batch_first=False,
             num_layers=1,
             bidirectional=True,
         )
 
-        self.ln1 = nn.LayerNorm(hidden_size * 2)
+        self.ln1 = nn.LayerNorm(config.hidden_size * 2)
 
         # dropout: [N, H * 2] -> [N, H * 2]
-        self.dropout = nn.Dropout(p=0.2)
+        self.dropout = nn.Dropout(p=config.dropout)
 
         # fc: [N, H * 2] -> [N, C]
-        self.fc = nn.Linear(hidden_size * 2, output_size)
+        self.fc = nn.Linear(config.hidden_size * 2, config.class_size)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -105,27 +193,27 @@ class NamesClassifierGRU(nn.Module):
     N: batch_size
     """
 
-    def __init__(self, input_size, hidden_size, output_size, dropout):
+    def __init__(self, config: Config):
         super().__init__()
 
         # gru: [S, N, D] or PackedSequence -> hidden [num_layers * num_directions, N, H]
         # num_layers * num_directions = 2 (since bidirectional=True, num_layers=1)
         self.gru = nn.GRU(
-            input_size=input_size,
-            hidden_size=hidden_size,
+            input_size=config.vocab_size,
+            hidden_size=config.hidden_size,
             batch_first=False,
             num_layers=1,
             bidirectional=True,
         )
 
         # LayerNorm: [N, H * 2] -> [N, H * 2]
-        self.layer_norm = nn.LayerNorm(hidden_size * 2)
+        self.layer_norm = nn.LayerNorm(config.hidden_size * 2)
 
         # dropout: [N, H * 2] -> [N, H * 2]
-        self.dropout = nn.Dropout(p=dropout)  # Use the passed dropout value
+        self.dropout = nn.Dropout(p=config.dropout)  # Use the passed dropout value
 
         # fc: [N, H * 2] -> [N, C]
-        self.fc = nn.Linear(hidden_size * 2, output_size)
+        self.fc = nn.Linear(config.hidden_size * 2, config.class_size)
 
     def forward(self, x: torch.Tensor | PackedSequence) -> torch.Tensor:
         """
@@ -162,52 +250,31 @@ class Batch:
         return cls(samples=batch)
 
 
-class SequentialBatchLearner(Learner[Batch]):
-    def __init__(
-        self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
-    ):
-        super().__init__(model, optimizer, criterion)
-
-    def batch_step(self, batch: Batch) -> BatchResult:
-        outputs: list[torch.Tensor] = []
-        labels: list[torch.Tensor] = []
-        batch_loss = torch.tensor(0.0)
-
-        for sample in batch.samples:
-            # output: [1, C]
-            output = self.model(sample.input)
-            outputs.append(output)
-            labels.append(sample.label)
-            batch_loss += self.criterion(output, sample.label)
-
-        # outputs: [N, C]
-        outputs_tensor = torch.cat(outputs, dim=0)
-        labels_tensor = torch.cat(labels, dim=0)
-
-        return BatchResult(
-            outputs=outputs_tensor,
-            labels=labels_tensor,
-            loss=batch_loss,
-            sample_count=len(batch.samples),
-        )
-
-
 class ParallelBatchLearner(Learner):
     def __init__(
-        self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        criterion: nn.Module,
+        config: Config,
     ):
         super().__init__(model, optimizer, criterion)
+        self.config = config
 
     def batch_step(self, batch: Batch) -> BatchResult:
         # Sort samples by input length in descending order
         batch.samples.sort(key=lambda x: len(x.input), reverse=True)
 
-        # sample.input: [S, 1, V]
-        # inputs: [S, N, V]
+        # sample.input: [S, V]
+        # padded_inputs: [max_S, B, V]
+        max_S = batch.samples[0].input.shape[0]
+        B = len(batch.samples)
+        V = self.config.vocab_size
         padded_inputs = pad_sequence(
             [sample.input for sample in batch.samples],
             batch_first=False,
-        ).squeeze(2)
+        )
+        assert_shape("padded_inputs", padded_inputs, (max_S, B, V))
 
         packed_inputs: PackedSequence = pack_padded_sequence(
             input=padded_inputs,
@@ -217,11 +284,15 @@ class ParallelBatchLearner(Learner):
         )
 
         # sample.label: [1]
-        # labels: [N]
+        # labels: [B]
         labels = torch.cat([sample.label for sample in batch.samples])
+        assert_shape("labels", labels, (B,))
 
-        # shape: [N, C]
+        # shape: [B, C]
+        C = self.config.class_size
         outputs = self.model(packed_inputs)
+        assert_shape("outputs", outputs, (B, C))
+
         batch_loss = self.criterion(outputs, labels)
 
         return BatchResult(

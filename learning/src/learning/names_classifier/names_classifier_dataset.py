@@ -33,18 +33,20 @@ class NamesClassifierDataset(Dataset[NameSample]):
         self,
         names_data_source: NamesDataSource,
         tokenizer: Tokenizer,
+        device: torch.device = torch.device("cpu"),
     ):
         self.names_data_source = names_data_source
         self.samples: list[NameSample] = []
 
         for country_idx, names in names_data_source.country_idx_to_names.items():
+            label = torch.tensor(
+                [country_idx],
+                dtype=torch.long,
+                device=device,
+            )
             for name in names:
-                self.samples.append(
-                    NameSample(
-                        input=tokenizer.to_one_hot(name, batch_dim=1),
-                        label=torch.tensor(country_idx).unsqueeze(0),
-                    )
-                )
+                input = tokenizer.to_one_hot(name)
+                self.samples.append(NameSample(input=input, label=label))
 
     def __len__(self) -> int:
         return len(self.samples)

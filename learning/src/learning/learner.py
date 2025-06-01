@@ -155,44 +155,5 @@ class Learner(Generic[BatchT]):
 
         return train_losses, eval_losses
 
-    def predict(self, input: torch.Tensor) -> int:
-        """
-        seq_length: S
-        input_size: D
-
-        input: [S, 1, D]
-        """
-        _, idx = self.predict_topk(input, k=1)
-        return int(idx.item())
-
-    def predict_topk(
-        self, input: torch.Tensor, k: int
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        seq_length: S
-        input_size: D
-
-        input: [S, 1, D]
-
-        returns:
-            likelihoods: [K]
-            indices: [K]
-        """
-        self.model.eval()
-        with torch.no_grad():
-            # output: [1, C]
-            output = self.model(input)
-            # probabilities: [1, C]
-            probabilities = torch.softmax(output, dim=1)
-
-            # topk_logits: [1, K]
-            # indices: [1, K]
-            _topk_logits, indices = torch.topk(output, k=k, dim=1)
-
-            # topk_probabilities: [1, K]
-            topk_probabilities = torch.gather(probabilities, dim=1, index=indices)
-
-            return topk_probabilities.squeeze(0), indices.squeeze(0)
-
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}(\nmodel={self.model}\noptimizer={self.optimizer}\ncriterion={self.criterion})"

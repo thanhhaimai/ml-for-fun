@@ -3,6 +3,8 @@ import unicodedata
 from collections import Counter, defaultdict
 from typing import Self
 
+import matplotlib.pyplot as plt
+
 from data.tokenizer import Tokenizer
 
 
@@ -78,12 +80,34 @@ class NamesDataSource:
         tokenizer.load(vocab)
         return cls(data, all_countries, tokenizer)
 
+    @property
     def class_frequency(self) -> list[float]:
         return [len(names) for names in self.country_idx_to_names.values()]
 
+    @property
     def token_frequency(self) -> list[float]:
         counter = Counter()
         for names in self.country_idx_to_names.values():
             for name in names:
                 counter.update(name)
         return [counter[token] for token in self.tokenizer.index_to_token]
+
+    def plot_class_frequency(self, fig_size: tuple[int, int]):
+        f, ax = plt.subplots(figsize=fig_size)
+        ax.set_title("Class Frequency")
+        ax.set_xlabel("Class")
+        ax.set_ylabel("Frequency")
+        ax.set_xticks(range(len(self.countries)))
+        ax.set_xticklabels(self.countries, rotation=45, ha="right")
+        ax.bar(range(len(self.countries)), self.class_frequency)
+        plt.show()
+
+    def plot_token_frequency(self, fig_size: tuple[int, int]):
+        f, ax = plt.subplots(figsize=fig_size)
+        ax.set_title("Token Frequency")
+        ax.set_xlabel("Token")
+        ax.set_ylabel("Frequency")
+        ax.set_xticks(range(len(self.tokenizer.index_to_token)))
+        ax.set_xticklabels(self.tokenizer.index_to_token, rotation=45, ha="right")
+        ax.bar(range(len(self.tokenizer.index_to_token)), self.token_frequency)
+        plt.show()

@@ -20,9 +20,7 @@ class Tokenizer:
         self,
         use_start_token: bool = False,
         use_end_token: bool = False,
-        device: torch.device = torch.device("cpu"),
     ):
-        self.device = device
         self._special_tokens = []
         self._special_tokens.append(self.PAD_TOKEN)
         if use_start_token:
@@ -60,7 +58,7 @@ class Tokenizer:
         self,
         s: str,
         batch_dim: int | None = None,
-        dtype: torch.dtype = torch.float32,
+        device: torch.device = torch.device("cpu"),
     ) -> torch.Tensor:
         """
         return:
@@ -69,9 +67,9 @@ class Tokenizer:
             shape [S, 1, V] if batch_dim == 1
         """
         one_hot = F.one_hot(
-            torch.tensor(self.t2i(s), device=self.device),
+            torch.tensor(self.t2i(s), device=device),
             num_classes=self.vocab_size,
-        ).to(dtype)
+        ).float()
 
         if batch_dim is not None:
             return one_hot.unsqueeze(batch_dim)
@@ -82,7 +80,7 @@ class Tokenizer:
         self,
         sentences: list[str],
         batch_dim: int,
-        dtype: torch.dtype = torch.float32,
+        device: torch.device = torch.device("cpu"),
     ) -> torch.Tensor:
         """
         return: all sentences padded to the same length
@@ -96,7 +94,7 @@ class Tokenizer:
         else:
             raise ValueError(f"Unsupported batch_dim: {batch_dim}")
 
-        one_hots = [self.to_one_hot(sentence, dtype=dtype) for sentence in sentences]
+        one_hots = [self.to_one_hot(sentence, device=device) for sentence in sentences]
         return pad_sequence(
             sequences=one_hots,
             batch_first=batch_first,
