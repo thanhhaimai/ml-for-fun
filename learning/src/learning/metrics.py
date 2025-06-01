@@ -24,11 +24,17 @@ class Metric:
 
 
 class ConfusionMatrixMetric(Metric):
-    def __init__(self, classes: list[str], eps: float = 1e-6):
+    def __init__(
+        self,
+        classes: list[str],
+        eps: float = 1e-6,
+        device: torch.device = torch.device("cpu"),
+    ):
         """
         num_classes: C
         """
         super().__init__()
+        self.device = device
         self.classes = classes
         self.num_classes = len(classes)
         self.eps = eps
@@ -62,7 +68,9 @@ class ConfusionMatrixMetric(Metric):
         # predictions: [N]
         predictions = outputs.argmax(dim=1)
         indices = labels * self.num_classes + predictions
-        self.confusion_matrix.view(-1).index_add_(0, indices, torch.ones_like(indices))
+        self.confusion_matrix.view(-1).index_add_(
+            0, indices, torch.ones_like(indices, device=self.device)
+        )
 
     def on_epoch_complete(self, epoch_idx: int):
         # Track the confusion matrix for the whole training
@@ -74,6 +82,7 @@ class ConfusionMatrixMetric(Metric):
             self.num_classes,
             self.num_classes,
             dtype=torch.int64,
+            device=self.device,
         )
 
     @property

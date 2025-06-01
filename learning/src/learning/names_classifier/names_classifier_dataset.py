@@ -45,7 +45,7 @@ class NamesClassifierDataset(Dataset[NameSample]):
                 device=device,
             )
             for name in names:
-                input = tokenizer.to_one_hot(name)
+                input = tokenizer.to_one_hot(name, device=device)
                 self.samples.append(NameSample(input=input, label=label))
 
     def __len__(self) -> int:
