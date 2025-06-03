@@ -45,12 +45,10 @@ class Learner(Generic[BatchT]):
     ) -> float:
         epoch_loss = 0
         epoch_samples = 0
-        # with torch.autocast(device_type=self.device.type, enabled=True):
         for batch in dataloader:
             batch_result = self.batch_step(batch)
 
             if train:
-                # with torch.autocast(device_type=self.device.type, enabled=False):
                 self.optimizer.zero_grad()
                 (batch_result.loss / batch_result.sample_count).backward()
                 self.optimizer.step()
