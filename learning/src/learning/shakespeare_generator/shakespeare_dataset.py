@@ -40,7 +40,6 @@ class ShakespeareDataset(Dataset[Sample]):
         self.shakespeare_data_source = shakespeare_data_source
         self.sequence_length = sequence_length
         self.tokenizer = tokenizer
-        self.device = device
         self.samples: list[Sample] = []
 
         if not self.shakespeare_data_source.text:
@@ -49,7 +48,7 @@ class ShakespeareDataset(Dataset[Sample]):
 
         indices = torch.tensor(
             data=tokenizer.t2i(self.shakespeare_data_source.text),
-            device=self.device,
+            device=device,
         )
 
         for i in range(len(indices) - self.sequence_length):

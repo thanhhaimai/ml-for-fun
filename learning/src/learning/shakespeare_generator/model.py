@@ -21,6 +21,7 @@ class Config:
     sequence_length: int
     embedding_size: int
     num_heads: int
+    num_blocks: int
     epochs: int
     dropout: float
     learning_rate: float
@@ -152,12 +153,12 @@ class FeedForward(nn.Module):
         super().__init__()
         self.linear = nn.Linear(
             config.embedding_size,
-            config.embedding_size,
+            config.embedding_size * 2,
             device=config.device,
         )
         self.gelu = nn.GELU()
         self.projection = nn.Linear(
-            config.embedding_size,
+            config.embedding_size * 2,
             config.embedding_size,
             device=config.device,
         )
@@ -172,10 +173,10 @@ class FeedForward(nn.Module):
         assert_shape("x", x, (B, S, E))
 
         output = self.linear(x)
-        assert_shape("output", output, (B, S, E))
+        assert_shape("output", output, (B, S, E * 2))
 
         output = self.gelu(output)
-        assert_shape("output", output, (B, S, E))
+        assert_shape("output", output, (B, S, E * 2))
 
         output = self.projection(output)
         assert_shape("output", output, (B, S, E))
@@ -247,7 +248,7 @@ class ShakespeareGenerator(nn.Module):
 
         # [B, S, E] -> [B, S, E]
         self.blocks = nn.Sequential(
-            Block(config),
+            *[Block(config) for _ in range(config.num_blocks)],
             nn.LayerNorm(
                 config.embedding_size,
                 device=config.device,
@@ -342,11 +343,28 @@ class ShakespeareGenerator(nn.Module):
 
 @dataclass
 class Batch:
-    samples: list[Sample]
+    inputs: torch.Tensor
+    labels: torch.Tensor
 
     @classmethod
-    def from_samples(cls, batch: list[Sample]) -> Self:
-        return cls(samples=batch)
+    def from_samples(cls, samples: list[Sample]) -> Self:
+        B = len(samples)
+        S = samples[0].input.shape[0]
+
+        # shape: [B, S] - Keep on CPU for multiprocessing compatibility
+        inputs = torch.stack([sample.input for sample in samples], dim=0)
+        assert_shape("inputs", inputs, (B, S))
+
+        # shape: [B, S] - Keep on CPU for multiprocessing compatibility
+        labels = torch.stack([sample.label for sample in samples], dim=0)
+        assert_shape("labels", labels, (B, S))
+
+        return cls(inputs=inputs, labels=labels)
+
+    def pin_memory(self) -> Self:
+        self.inputs.pin_memory()
+        self.labels.pin_memory()
+        return self
 
 
 class ParallelBatchLearner(Learner[Batch]):
@@ -362,16 +380,13 @@ class ParallelBatchLearner(Learner[Batch]):
         assert self.criterion.reduction == "sum", "Reduction must be 'sum'"
 
     def batch_step(self, batch: Batch) -> BatchResult:
-        B = len(batch.samples)
-        S = batch.samples[0].input.shape[0]
+        B, S = batch.inputs.shape
         V = self.model.vocab_size
 
-        # shape: [B, S]
-        inputs = torch.stack([sample.input for sample in batch.samples], dim=0)
+        # Move tensors to GPU in main process (not in workers)
+        inputs = batch.inputs.to(self.device, non_blocking=True)
+        labels = batch.labels.to(self.device, non_blocking=True)
         assert_shape("inputs", inputs, (B, S))
-
-        # shape: [B, S]
-        labels = torch.stack([sample.label for sample in batch.samples], dim=0)
         assert_shape("labels", labels, (B, S))
 
         # shape: [B, S, V]

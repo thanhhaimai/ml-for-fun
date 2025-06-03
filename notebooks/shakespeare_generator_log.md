@@ -318,7 +318,7 @@ Result: may not finish hahaha. Runs very slow, but it learns so well!
 2/100 -- 355.16s  Train loss  1.8667  Eval loss  1.7627  <<
 ```
 
-## Switch to Desktop
+## 10: Switch to Desktop
 
 1080 Ti
 
@@ -363,3 +363,117 @@ Result: Nice, faster!
 ```
 
 NOTE: I'm using a poor 1080 Ti, which has lower FP16 performance than FP32. So `torch.autocast` wouldn't help here.
+
+## 11: Keep dataset on CPU, and only move the batch to CUDA
+
+Also with that, scale up the batch until OOM. The dataloader has 4 worker, and `pin_memory=True`
+
+```python
+Config(batch_size=8192, sequence_length=64, embedding_size=64, num_heads=8, num_blocks=2, epochs=1, dropout=0.1, learning_rate=0.001, patience=30, min_delta=0.001, device=device(type='cuda'))
+ParallelBatchLearner
+model=ShakespeareGenerator(
+  (embedding): Embedding(66, 64)
+  (positional_embedding): Embedding(64, 64)
+  (blocks): Sequential(
+    (0): Block(
+      (norm1): LayerNorm((64,), eps=1e-05, elementwise_affine=True)
+      (heads): MultiHeadAttention(
+        (heads): ModuleList(
+          (0-7): 8 x AttentionHead(
+            (query): Linear(in_features=64, out_features=8, bias=False)
+            (key): Linear(in_features=64, out_features=8, bias=False)
+            (value): Linear(in_features=64, out_features=8, bias=False)
+            (dropout): Dropout(p=0.1, inplace=False)
+          )
+        )
+        (projection): Linear(in_features=64, out_features=64, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (norm2): LayerNorm((64,), eps=1e-05, elementwise_affine=True)
+      (feed_forward): FeedForward(
+        (linear): Linear(in_features=64, out_features=256, bias=True)
+        (gelu): GELU(approximate='none')
+        (projection): Linear(in_features=256, out_features=64, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+    )
+    (1): Block(
+      (norm1): LayerNorm((64,), eps=1e-05, elementwise_affine=True)
+      (heads): MultiHeadAttention(
+        (heads): ModuleList(
+          (0-7): 8 x AttentionHead(
+            (query): Linear(in_features=64, out_features=8, bias=False)
+            (key): Linear(in_features=64, out_features=8, bias=False)
+            (value): Linear(in_features=64, out_features=8, bias=False)
+            (dropout): Dropout(p=0.1, inplace=False)
+          )
+        )
+        (projection): Linear(in_features=64, out_features=64, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+      (norm2): LayerNorm((64,), eps=1e-05, elementwise_affine=True)
+      (feed_forward): FeedForward(
+        (linear): Linear(in_features=64, out_features=256, bias=True)
+        (gelu): GELU(approximate='none')
+        (projection): Linear(in_features=256, out_features=64, bias=True)
+        (dropout): Dropout(p=0.1, inplace=False)
+      )
+    )
+    (2): LayerNorm((64,), eps=1e-05, elementwise_affine=True)
+  )
+  (linear): Linear(in_features=64, out_features=66, bias=True)
+)
+======================================================================
+Layer (type:depth-idx)                        Param #
+======================================================================
+ShakespeareGenerator                          --
+├─Embedding: 1-1                              4,224
+├─Embedding: 1-2                              4,096
+├─Sequential: 1-3                             --
+│    └─Block: 2-1                             --
+│    │    └─LayerNorm: 3-1                    128
+│    │    └─MultiHeadAttention: 3-2           16,448
+│    │    └─LayerNorm: 3-3                    128
+│    │    └─FeedForward: 3-4                  33,088
+│    └─Block: 2-2                             --
+│    │    └─LayerNorm: 3-5                    128
+│    │    └─MultiHeadAttention: 3-6           16,448
+│    │    └─LayerNorm: 3-7                    128
+│    │    └─FeedForward: 3-8                  33,088
+│    └─LayerNorm: 2-3                         128
+├─Linear: 1-4                                 4,290
+======================================================================
+Total params: 112,322
+Trainable params: 112,322
+Non-trainable params: 0
+======================================================================
+optimizer=Adam (
+Parameter Group 0
+    amsgrad: False
+    betas: (0.9, 0.999)
+    capturable: False
+    decoupled_weight_decay: False
+    differentiable: False
+    eps: 1e-08
+    foreach: None
+    fused: None
+    lr: 0.001
+    maximize: False
+    weight_decay: 0
+)
+criterion=CrossEntropyLoss()
+```
+
+Result:
+
+```python
+0/1 -- 90.67s  Train loss  2.9852  Eval loss  2.5462  <<
+Training completed. Elapsed time: 94.32s
+```
+
+Fix `pin_memory` wasn't being active for custom batch
+
+```python
+0/1 -- 89.90s  Train loss  2.9852  Eval loss  2.5462  <<
+Training completed. Elapsed time: 93.49s
+```
