@@ -112,14 +112,20 @@ class AttentionHead(nn.Module):
 class MultiHeadAttention(nn.Module):
     def __init__(self, config: Config):
         super().__init__()
-        self.heads = nn.ModuleList(
-            [
-                AttentionHead(
-                    config,
-                )
-                for _ in range(config.num_heads)
-            ],
+        if config.embedding_size % config.num_heads != 0:
+            raise ValueError(
+                f"Embedding size {config.embedding_size} must be divisible by number of heads {config.num_heads}"
+            )
+        self.num_heads = config.num_heads
+        self.head_size = config.embedding_size // config.num_heads
+
+        # shape: [B, S, E] -> [B, S, E * 3]
+        self.qkv_fc = nn.Linear(
+            config.embedding_size,
+            config.embedding_size * 3,
+            device=config.device,
         )
+
         self.projection = nn.Linear(
             config.embedding_size,
             config.embedding_size,
@@ -135,8 +141,32 @@ class MultiHeadAttention(nn.Module):
         B, S, E = x.shape
         assert_shape("x", x, (B, S, E))
 
-        # shape: [B, S, H * num_heads] = [B, S, E] since H = E // num_heads
-        output = torch.cat([head(x) for head in self.heads], dim=-1)
+        qkv = self.qkv_fc(x)
+        assert_shape("qkv", qkv, (B, S, E * 3))
+
+        # shape: [B, S, E]
+        q, k, v = qkv.split(E, dim=-1)
+        assert_shape("q", q, (B, S, E))
+        assert_shape("k", k, (B, S, E))
+        assert_shape("v", v, (B, S, E))
+
+        # shape: [B, S, H, E // H]
+        q = q.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
+        assert_shape("q", q, (B, self.num_heads, S, self.head_size))
+
+        # shape: [B, S, H, E // H]
+        k = k.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
+        assert_shape("k", k, (B, self.num_heads, S, self.head_size))
+
+        # shape: [B, S, H, E // H]
+        v = v.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
+        assert_shape("v", v, (B, self.num_heads, S, self.head_size))
+
+        # shape: [B, H, S, E // H]
+        output = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        assert_shape("output", output, (B, self.num_heads, S, self.head_size))
+
+        output = output.transpose(1, 2).contiguous().view(B, S, E)
         assert_shape("output", output, (B, S, E))
 
         output = self.projection(output)
