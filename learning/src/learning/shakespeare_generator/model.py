@@ -141,24 +141,21 @@ class MultiHeadAttention(nn.Module):
         B, S, E = x.shape
         assert_shape("x", x, (B, S, E))
 
-        qkv = self.qkv_fc(x)
-        assert_shape("qkv", qkv, (B, S, E * 3))
-
         # shape: [B, S, E]
-        q, k, v = qkv.split(E, dim=-1)
+        q, k, v = self.qkv_fc(x).split(E, dim=-1)
         assert_shape("q", q, (B, S, E))
         assert_shape("k", k, (B, S, E))
         assert_shape("v", v, (B, S, E))
 
-        # shape: [B, S, H, E // H]
+        # shape: [B, H, S, E // H]
         q = q.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("q", q, (B, self.num_heads, S, self.head_size))
 
-        # shape: [B, S, H, E // H]
+        # shape: [B, H, S, E // H]
         k = k.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("k", k, (B, self.num_heads, S, self.head_size))
 
-        # shape: [B, S, H, E // H]
+        # shape: [B, H, S, E // H]
         v = v.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("v", v, (B, self.num_heads, S, self.head_size))
 
