@@ -304,6 +304,7 @@ class GPT2(nn.Module):
     def generate(self, indices: torch.Tensor, max_length: int) -> torch.Tensor:
         """
         indices: [B, S] -- the batched sequence of indices
+        max_length: number of tokens to generate
         return: [B, S + max_length] -- after generated max_length tokens
         """
         self.eval()
