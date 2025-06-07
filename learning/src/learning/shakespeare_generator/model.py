@@ -242,7 +242,7 @@ class Block(nn.Module):
         assert_shape("output", output, (B, S, E))
 
         # shape: [B, S, E]
-        output = x + self.feed_forward(self.norm2(output))
+        output = output + self.feed_forward(self.norm2(output))
         assert_shape("output", output, (B, S, E))
 
         return output
