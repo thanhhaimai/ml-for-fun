@@ -16,6 +16,27 @@ def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
 
 
+@dataclass
+class ModelConfig:
+    embedding_size: int
+    num_heads: int
+    num_blocks: int
+    vocab_size: int = 50257
+    sequence_length: int = 1024
+    feed_forward_expansion_factor: int = 4
+    dropout: float = 0.1
+    device: torch.device = torch.device("cpu")
+
+
+@dataclass
+class LearnerConfig:
+    batch_size: int
+    epochs: int
+    learning_rate: float
+    patience: int | None
+    min_delta: float | None
+
+
 class PretrainedName(StrEnum):
     GPT2_SMALL = "openai-community/gpt2"
     GPT2_MEDIUM = "openai-community/gpt2-medium"
@@ -23,65 +44,33 @@ class PretrainedName(StrEnum):
     GPT2_XL = "openai-community/gpt2-xl"
 
 
-@dataclass
-class PretrainedConfig:
-    num_blocks: int
-    num_heads: int
-    embedding_size: int
-    vocab_size: int
-    sequence_length: int
-
-
 # Pretrained GPT2 configs
 PRETRAINED_CONFIG = {
-    PretrainedName.GPT2_SMALL: PretrainedConfig(
+    PretrainedName.GPT2_SMALL: ModelConfig(
         num_blocks=12,
         num_heads=12,
         embedding_size=768,
-        vocab_size=50257,
-        sequence_length=1024,
     ),
-    PretrainedName.GPT2_MEDIUM: PretrainedConfig(
+    PretrainedName.GPT2_MEDIUM: ModelConfig(
         num_blocks=24,
         num_heads=16,
         embedding_size=1024,
-        vocab_size=50257,
-        sequence_length=1024,
     ),
-    PretrainedName.GPT2_LARGE: PretrainedConfig(
+    PretrainedName.GPT2_LARGE: ModelConfig(
         num_blocks=36,
         num_heads=20,
         embedding_size=1280,
-        vocab_size=50257,
-        sequence_length=1024,
     ),
-    PretrainedName.GPT2_XL: PretrainedConfig(
+    PretrainedName.GPT2_XL: ModelConfig(
         num_blocks=48,
         num_heads=25,
         embedding_size=1600,
-        vocab_size=50257,
-        sequence_length=1024,
     ),
 }
 
 
-@dataclass
-class Config:
-    batch_size: int
-    sequence_length: int
-    embedding_size: int
-    num_heads: int
-    num_blocks: int
-    epochs: int
-    dropout: float
-    learning_rate: float
-    patience: int | None
-    min_delta: float | None
-    device: torch.device
-
-
 class MultiHeadAttention(nn.Module):
-    def __init__(self, config: Config):
+    def __init__(self, config: ModelConfig):
         super().__init__()
         if config.embedding_size % config.num_heads != 0:
             raise ValueError(
@@ -134,6 +123,7 @@ class MultiHeadAttention(nn.Module):
             k,
             v,
             is_causal=True,
+            dropout_p=self.dropout.p if self.training else 0.0,
         )
         assert_shape("output", output, (B, self.num_heads, S, self.head_size))
 
@@ -150,16 +140,18 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, config: Config):
+    def __init__(self, config: ModelConfig):
         super().__init__()
+        self.feed_forward_expansion_factor = config.feed_forward_expansion_factor
+
         self.linear = nn.Linear(
             config.embedding_size,
-            config.embedding_size * 2,
+            config.embedding_size * config.feed_forward_expansion_factor,
             device=config.device,
         )
         self.gelu = nn.GELU()
         self.projection = nn.Linear(
-            config.embedding_size * 2,
+            config.embedding_size * config.feed_forward_expansion_factor,
             config.embedding_size,
             device=config.device,
         )
@@ -174,10 +166,10 @@ class FeedForward(nn.Module):
         assert_shape("x", x, (B, S, E))
 
         output = self.linear(x)
-        assert_shape("output", output, (B, S, E * 2))
+        assert_shape("output", output, (B, S, E * self.feed_forward_expansion_factor))
 
         output = self.gelu(output)
-        assert_shape("output", output, (B, S, E * 2))
+        assert_shape("output", output, (B, S, E * self.feed_forward_expansion_factor))
 
         output = self.projection(output)
         assert_shape("output", output, (B, S, E))
@@ -189,10 +181,10 @@ class FeedForward(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, config: Config):
+    def __init__(self, config: ModelConfig):
         super().__init__()
         self.layer_norm1 = nn.LayerNorm(config.embedding_size, device=config.device)
-        self.heads = MultiHeadAttention(config)
+        self.attention = MultiHeadAttention(config)
 
         self.layer_norm2 = nn.LayerNorm(config.embedding_size, device=config.device)
         self.feed_forward = FeedForward(config)
@@ -206,11 +198,11 @@ class Block(nn.Module):
         assert_shape("x", x, (B, S, E))
 
         # shape: [B, S, E]
-        output = x + self.heads(self.layer_norm1(x))
+        output = x + self.attention(self.layer_norm1(x))
         assert_shape("output", output, (B, S, E))
 
         # shape: [B, S, E]
-        output = x + self.feed_forward(self.layer_norm2(output))
+        output = output + self.feed_forward(self.layer_norm2(output))
         assert_shape("output", output, (B, S, E))
 
         return output
@@ -219,17 +211,16 @@ class Block(nn.Module):
 class GPT2(nn.Module):
     def __init__(
         self,
-        config: Config,
-        vocab_size: int,
+        config: ModelConfig,
     ):
         super().__init__()
         self.sequence_length = config.sequence_length
-        self.vocab_size = vocab_size
+        self.vocab_size = config.vocab_size
         self.embedding_size = config.embedding_size
 
         # [B, S] of vocab index -> [B, S, E]
         self.embedding = nn.Embedding(
-            num_embeddings=vocab_size,
+            num_embeddings=config.vocab_size,
             embedding_dim=config.embedding_size,
             device=config.device,
         )
@@ -240,6 +231,8 @@ class GPT2(nn.Module):
             embedding_dim=config.embedding_size,
             device=config.device,
         )
+
+        self.dropout = nn.Dropout(config.dropout)
 
         # [B, S, E] -> [B, S, E]
         self.blocks = nn.ModuleList(
@@ -252,7 +245,7 @@ class GPT2(nn.Module):
         # NOTE: GPT2 uses bias=False for this last linear layer
         self.linear = nn.Linear(
             config.embedding_size,
-            vocab_size,
+            config.vocab_size,
             bias=False,
             device=config.device,
         )
@@ -265,85 +258,6 @@ class GPT2(nn.Module):
                 device=config.device,
             ),
         )
-
-    @classmethod
-    def from_pretrained(cls, pretrained_name: PretrainedName) -> Self:
-        pretrained_config = PRETRAINED_CONFIG[pretrained_name]
-
-        model = cls(
-            config=Config(
-                embedding_size=pretrained_config.embedding_size,
-                num_blocks=pretrained_config.num_blocks,
-                num_heads=pretrained_config.num_heads,
-                sequence_length=pretrained_config.sequence_length,
-                dropout=0.0,
-                batch_size=1,
-                epochs=1,
-                learning_rate=0.0,
-                patience=None,
-                min_delta=None,
-                device=torch.device("cpu"),
-            ),
-            vocab_size=pretrained_config.vocab_size,
-        )
-
-        pretrained_model = GPT2LMHeadModel.from_pretrained(pretrained_name)
-        pretrained_state = pretrained_model.state_dict()
-        model_state = model.state_dict()
-
-        model_state["embedding.weight"] = pretrained_state["transformer.wte.weight"]
-        model_state["positional_embedding.weight"] = pretrained_state[
-            "transformer.wpe.weight"
-        ]
-        model_state["layer_norm.weight"] = pretrained_state["transformer.ln_f.weight"]
-        model_state["layer_norm.bias"] = pretrained_state["transformer.ln_f.bias"]
-        model_state["linear.weight"] = pretrained_state["lm_head.weight"]
-
-        for i in range(pretrained_config.num_blocks):
-            # Attention block
-            model_state[f"blocks.{i}.heads.qkv_fc.weight"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_attn.weight"
-            ].T
-            model_state[f"blocks.{i}.heads.qkv_fc.bias"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_attn.bias"
-            ]
-            model_state[f"blocks.{i}.heads.projection.weight"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_proj.weight"
-            ].T
-            model_state[f"blocks.{i}.heads.projection.bias"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_proj.bias"
-            ]
-
-            # Norms
-            model_state[f"blocks.{i}.layer_norm1.weight"] = pretrained_state[
-                f"transformer.h.{i}.ln_1.weight"
-            ]
-            model_state[f"blocks.{i}.layer_norm1.bias"] = pretrained_state[
-                f"transformer.h.{i}.ln_1.bias"
-            ]
-            model_state[f"blocks.{i}.layer_norm2.weight"] = pretrained_state[
-                f"transformer.h.{i}.ln_2.weight"
-            ]
-            model_state[f"blocks.{i}.layer_norm2.bias"] = pretrained_state[
-                f"transformer.h.{i}.ln_2.bias"
-            ]
-
-            # FeedForward block
-            model_state[f"blocks.{i}.feed_forward.linear.weight"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_fc.weight"
-            ].T
-            model_state[f"blocks.{i}.feed_forward.linear.bias"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_fc.bias"
-            ]
-            model_state[f"blocks.{i}.feed_forward.projection.weight"] = (
-                pretrained_state[f"transformer.h.{i}.mlp.c_proj.weight"].T
-            )
-            model_state[f"blocks.{i}.feed_forward.projection.bias"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_proj.bias"
-            ]
-
-        model.load_state_dict(model_state)
-        return model
 
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
@@ -369,6 +283,9 @@ class GPT2(nn.Module):
 
         # shape: [B, S, E]
         embedding = tokens_embedding + positional_embedding
+        assert_shape("embedding", embedding, (B, S, E))
+
+        embedding = self.dropout(embedding)
         assert_shape("embedding", embedding, (B, S, E))
 
         # shape: [B, S, E]
@@ -417,6 +334,72 @@ class GPT2(nn.Module):
             assert_shape("indices", indices, (B, original_S + 1))
 
         return indices
+
+    @classmethod
+    def from_pretrained(
+        cls, pretrained_name: PretrainedName, device: torch.device
+    ) -> Self:
+        pretrained_model = GPT2LMHeadModel.from_pretrained(pretrained_name)
+        pretrained_state = pretrained_model.state_dict()
+
+        pretrained_config = PRETRAINED_CONFIG[pretrained_name]
+        pretrained_config.device = device
+        model = cls(config=pretrained_config)
+        model_state = model.state_dict()
+
+        model_state["embedding.weight"] = pretrained_state["transformer.wte.weight"]
+        model_state["positional_embedding.weight"] = pretrained_state[
+            "transformer.wpe.weight"
+        ]
+
+        # NOTE: on HF, the Linear layers are modeled as Conv1D layers
+        # Conv1D shape: [n_in, n_out]
+        # Linear shape: [n_out, n_in]
+        # So we need to transpose the weights to match our Linear layer
+        for i in range(pretrained_config.num_blocks):
+            model_state[f"blocks.{i}.layer_norm1.weight"] = pretrained_state[
+                f"transformer.h.{i}.ln_1.weight"
+            ]
+            model_state[f"blocks.{i}.layer_norm1.bias"] = pretrained_state[
+                f"transformer.h.{i}.ln_1.bias"
+            ]
+            model_state[f"blocks.{i}.attention.qkv_fc.weight"] = pretrained_state[
+                f"transformer.h.{i}.attn.c_attn.weight"
+            ].T
+            model_state[f"blocks.{i}.attention.qkv_fc.bias"] = pretrained_state[
+                f"transformer.h.{i}.attn.c_attn.bias"
+            ]
+            model_state[f"blocks.{i}.attention.projection.weight"] = pretrained_state[
+                f"transformer.h.{i}.attn.c_proj.weight"
+            ].T
+            model_state[f"blocks.{i}.attention.projection.bias"] = pretrained_state[
+                f"transformer.h.{i}.attn.c_proj.bias"
+            ]
+            model_state[f"blocks.{i}.layer_norm2.weight"] = pretrained_state[
+                f"transformer.h.{i}.ln_2.weight"
+            ]
+            model_state[f"blocks.{i}.layer_norm2.bias"] = pretrained_state[
+                f"transformer.h.{i}.ln_2.bias"
+            ]
+            model_state[f"blocks.{i}.feed_forward.linear.weight"] = pretrained_state[
+                f"transformer.h.{i}.mlp.c_fc.weight"
+            ].T
+            model_state[f"blocks.{i}.feed_forward.linear.bias"] = pretrained_state[
+                f"transformer.h.{i}.mlp.c_fc.bias"
+            ]
+            model_state[f"blocks.{i}.feed_forward.projection.weight"] = (
+                pretrained_state[f"transformer.h.{i}.mlp.c_proj.weight"].T
+            )
+            model_state[f"blocks.{i}.feed_forward.projection.bias"] = pretrained_state[
+                f"transformer.h.{i}.mlp.c_proj.bias"
+            ]
+
+        model_state["layer_norm.weight"] = pretrained_state["transformer.ln_f.weight"]
+        model_state["layer_norm.bias"] = pretrained_state["transformer.ln_f.bias"]
+        model_state["linear.weight"] = pretrained_state["lm_head.weight"]
+
+        model.load_state_dict(model_state)
+        return model
 
 
 @dataclass
