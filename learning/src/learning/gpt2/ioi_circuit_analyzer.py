@@ -23,36 +23,36 @@ class IoiCircuitAnalyzer:
         self.tokenizer = tokenizer
         self.device = device
 
+    @torch.no_grad()
     def topk_logits(self, prompt: str, k: int) -> TopKLogitsResult:
         self.model.eval()
-        with torch.no_grad():
-            indices = self.tokenizer.encode(prompt)
-            S = len(indices)
+        indices = self.tokenizer.encode(prompt)
+        S = len(indices)
 
-            # shape: [B, S]
-            inputs = torch.tensor([indices], dtype=torch.long, device=self.device)
-            assert_shape("inputs", inputs, (1, S))
+        # shape: [B, S]
+        inputs = torch.tensor([indices], dtype=torch.long, device=self.device)
+        assert_shape("inputs", inputs, (1, S))
 
-            # shape: [B, S, V]
-            outputs = self.model(inputs)
-            assert_shape("outputs", outputs, (1, S, self.model.config.vocab_size))
+        # shape: [B, S, V]
+        outputs = self.model(inputs)
+        assert_shape("outputs", outputs, (1, S, self.model.config.vocab_size))
 
-            # shape: [B, V]
-            last_output = outputs[:, -1, :]
-            assert_shape("last_output", last_output, (1, self.model.config.vocab_size))
+        # shape: [B, V]
+        last_output = outputs[:, -1, :]
+        assert_shape("last_output", last_output, (1, self.model.config.vocab_size))
 
-            # shape: [V] (due to the squeeze)
-            probs = torch.softmax(last_output, dim=-1).squeeze(0)
-            assert_shape("probs", probs, (self.model.config.vocab_size,))
+        # shape: [V] (due to the squeeze)
+        probs = torch.softmax(last_output, dim=-1).squeeze(0)
+        assert_shape("probs", probs, (self.model.config.vocab_size,))
 
-            top_probs, top_indices = torch.topk(probs, k=k)
-            assert_shape("top_probs", top_probs, (k,))
-            assert_shape("top_indices", top_indices, (k,))
+        top_probs, top_indices = torch.topk(probs, k=k)
+        assert_shape("top_probs", top_probs, (k,))
+        assert_shape("top_indices", top_indices, (k,))
 
-            return TopKLogitsResult(
-                top_probs=top_probs,
-                top_indices=top_indices,
-            )
+        return TopKLogitsResult(
+            top_probs=top_probs,
+            top_indices=top_indices,
+        )
 
     def analyze(self):
         pass

@@ -293,7 +293,7 @@ class FeedForward(nn.Module):
             config.embedding_size * config.feed_forward_expansion_factor,
             device=config.device,
         )
-        self.gelu = nn.GELU()
+        self.gelu = nn.GELU(approximate="tanh")
         self.projection = nn.Linear(
             config.embedding_size * config.feed_forward_expansion_factor,
             config.embedding_size,
@@ -538,31 +538,37 @@ class GPT2(nn.Module):
             q_weight, k_weight, v_weight = c_attn_weight.split(E, dim=0)
             q_bias, k_bias, v_bias = c_attn_bias.split(E, dim=0)
 
-            # Each head gets a slice from each of Q, K, V
-            for head_idx in range(pretrained_config.num_heads):
-                start_idx = head_idx * head_size
-                end_idx = (head_idx + 1) * head_size
+            # Reshape Q, K, V weights to separate heads
+            # HF stores weights as [E, E] where E = num_heads * head_size
+            # We need to reshape to [num_heads, head_size, E] then extract each head
+            q_weight = q_weight.view(pretrained_config.num_heads, head_size, E)
+            k_weight = k_weight.view(pretrained_config.num_heads, head_size, E)
+            v_weight = v_weight.view(pretrained_config.num_heads, head_size, E)
 
-                # For each head, extract the corresponding slice and transpose for Linear layer
-                # q_weight[start_idx:end_idx, :] gives [head_size, E] which is correct for Linear
+            q_bias = q_bias.view(pretrained_config.num_heads, head_size)
+            k_bias = k_bias.view(pretrained_config.num_heads, head_size)
+            v_bias = v_bias.view(pretrained_config.num_heads, head_size)
+
+            # Each head gets its corresponding slice
+            for head_idx in range(pretrained_config.num_heads):
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.query.weight"
-                ] = q_weight[start_idx:end_idx, :]
+                ] = q_weight[head_idx]
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.query.bias"
-                ] = q_bias[start_idx:end_idx]
+                ] = q_bias[head_idx]
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.key.weight"
-                ] = k_weight[start_idx:end_idx, :]
+                ] = k_weight[head_idx]
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.key.bias"
-                ] = k_bias[start_idx:end_idx]
+                ] = k_bias[head_idx]
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.value.weight"
-                ] = v_weight[start_idx:end_idx, :]
+                ] = v_weight[head_idx]
                 model_state[
                     f"blocks_module.{i}.attention.heads_module.{head_idx}.value.bias"
-                ] = v_bias[start_idx:end_idx]
+                ] = v_bias[head_idx]
 
             model_state[f"blocks_module.{i}.attention.projection.weight"] = (
                 pretrained_state[f"transformer.h.{i}.attn.c_proj.weight"].T
