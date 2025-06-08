@@ -1,7 +1,6 @@
 import pytest
 import tiktoken
 import torch
-import torch.nn.functional as F
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
 from learning.gpt2.model import GPT2, PretrainedName
@@ -58,23 +57,10 @@ def test_model_load(tokenizer: tiktoken.Encoding, device: torch.device):
     logits = model(indices)
     assert_shape("logits", logits, (B, 1, V))
 
-    probs = F.softmax(logits, dim=-1)
-
     pretrained_result: CausalLMOutputWithCrossAttentions = pretrained_model(indices)
     pretrained_logits = pretrained_result.logits
     assert pretrained_logits is not None
     assert_shape("pretrained_logits", pretrained_logits, (B, 1, V))
 
-    pretrained_probs = F.softmax(pretrained_logits, dim=-1)
-
-    print("-" * 80)
-    print(probs)
-    print("-" * 80)
-    print(pretrained_probs)
-
-    # Assert that the loaded model's logits are the same as the pretrained model's logits
-    print("-" * 80)
-    print(logits)
-    print("-" * 80)
-    print(pretrained_logits)
+    # Validate that the logits are the same from both models
     assert torch.allclose(logits, pretrained_logits)
