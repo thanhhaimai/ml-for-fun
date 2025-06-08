@@ -17,6 +17,12 @@ class TopKLogitsResult:
     top_indices: torch.Tensor
 
 
+@dataclass
+class HeadId:
+    block_idx: int
+    head_idx: int
+
+
 class IoiCircuitAnalyzer:
     def __init__(self, model: GPT2, tokenizer: tiktoken.Encoding, device: torch.device):
         self.model = model
@@ -53,6 +59,3 @@ class IoiCircuitAnalyzer:
             top_probs=top_probs,
             top_indices=top_indices,
         )
-
-    def analyze(self):
-        pass

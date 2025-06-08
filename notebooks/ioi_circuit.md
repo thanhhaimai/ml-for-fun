@@ -137,3 +137,9 @@ When Mary and John went to the store, John gave a drink to
 ```
 
 NOTE: the above results were from _one_ set of sample. It's better to curate a dataset of these and sample more oftens. Going to bed since it's late.
+
+## 3: Fix model to matches HF GPT2
+
+Wrote new `model_test.py`, which detected logits differences between `model` and `pretrained_model`. That means we were not as close to GPT2 as we thought. The main root cause is `GELU`. HF used the approximation form, and we didn't.
+
+Fixed the bug and re-run the notebook. The result doesn't change much (mostly the smaller probs that were changed, not the topk)
