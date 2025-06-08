@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import tiktoken
 import torch
 
@@ -9,13 +11,19 @@ def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
 
 
+@dataclass
+class TopKLogitsResult:
+    top_probs: torch.Tensor
+    top_indices: torch.Tensor
+
+
 class IoiCircuitAnalyzer:
     def __init__(self, model: GPT2, tokenizer: tiktoken.Encoding, device: torch.device):
         self.model = model
         self.tokenizer = tokenizer
         self.device = device
 
-    def topk_logits(self, prompt: str, k: int):
+    def topk_logits(self, prompt: str, k: int) -> TopKLogitsResult:
         self.model.eval()
         with torch.no_grad():
             indices = self.tokenizer.encode(prompt)
@@ -40,9 +48,11 @@ class IoiCircuitAnalyzer:
             top_probs, top_indices = torch.topk(probs, k=k)
             assert_shape("top_probs", top_probs, (k,))
             assert_shape("top_indices", top_indices, (k,))
-            for i in range(k):
-                token = self.tokenizer.decode([int(top_indices[i])])
-                print(f"{top_probs[i]:.2f} {token}")
+
+            return TopKLogitsResult(
+                top_probs=top_probs,
+                top_indices=top_indices,
+            )
 
     def analyze(self):
         pass
