@@ -82,19 +82,16 @@ class AttentionHead(nn.Module):
         self.query = nn.Linear(
             config.embedding_size,
             self.head_size,
-            bias=False,
             device=config.device,
         )
         self.key = nn.Linear(
             config.embedding_size,
             self.head_size,
-            bias=False,
             device=config.device,
         )
         self.value = nn.Linear(
             config.embedding_size,
             self.head_size,
-            bias=False,
             device=config.device,
         )
 
@@ -519,12 +516,52 @@ class GPT2(nn.Module):
             model_state[f"blocks.{i}.layer_norm1.bias"] = pretrained_state[
                 f"transformer.h.{i}.ln_1.bias"
             ]
-            model_state[f"blocks.{i}.attention.qkv_fc.weight"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_attn.weight"
-            ].T
-            model_state[f"blocks.{i}.attention.qkv_fc.bias"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_attn.bias"
-            ]
+
+            E = pretrained_config.embedding_size
+            head_size = E // pretrained_config.num_heads
+
+            # HF c_attn weight: [E, 3*E] in Conv1D format
+            # After transpose: [3*E, E] for Linear format
+            # The 3*E dimension contains [Q_all, K_all, V_all] concatenated
+            # with Q_all shape [E, E],
+            #      K_all shape [E, E],
+            #      V_all shape [E, E]
+            c_attn_weight = pretrained_state[f"transformer.h.{i}.attn.c_attn.weight"].T
+            assert_shape("c_attn_weight", c_attn_weight, (3 * E, E))
+
+            c_attn_bias = pretrained_state[f"transformer.h.{i}.attn.c_attn.bias"]
+            assert_shape("c_attn_bias", c_attn_bias, (3 * E,))
+
+            # Split into Q, K, V blocks: each [E, E]
+            q_weight, k_weight, v_weight = c_attn_weight.split(E, dim=0)
+            q_bias, k_bias, v_bias = c_attn_bias.split(E, dim=0)
+
+            # Each head gets a slice from each of Q, K, V
+            for head_idx in range(pretrained_config.num_heads):
+                start_idx = head_idx * head_size
+                end_idx = (head_idx + 1) * head_size
+
+                # For each head, extract the corresponding slice and transpose for Linear layer
+                # q_weight[start_idx:end_idx, :] gives [head_size, E] which is correct for Linear
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.query.weight"] = (
+                    q_weight[start_idx:end_idx, :]
+                )
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.query.bias"] = (
+                    q_bias[start_idx:end_idx]
+                )
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.key.weight"] = (
+                    k_weight[start_idx:end_idx, :]
+                )
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.key.bias"] = k_bias[
+                    start_idx:end_idx
+                ]
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.value.weight"] = (
+                    v_weight[start_idx:end_idx, :]
+                )
+                model_state[f"blocks.{i}.attention.heads.{head_idx}.value.bias"] = (
+                    v_bias[start_idx:end_idx]
+                )
+
             model_state[f"blocks.{i}.attention.projection.weight"] = pretrained_state[
                 f"transformer.h.{i}.attn.c_proj.weight"
             ].T

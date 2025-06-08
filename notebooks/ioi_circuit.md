@@ -67,3 +67,7 @@ Observation: Doesn't work if it's "John gave", but works with "Mary gave"
 
 - This feels like the original research result might be more fragile than the paper implies
 - Between the 3 last sentences, we change "." -> ";", and it changes the logits quite a bit
+
+## 2: Capturing attention outputs
+
+It turns out for path patching, Flash Attention is a road block. In Flash Attention, all the heads are merged together. However, we want to be able to freeze the output and patch each attention head independently.
