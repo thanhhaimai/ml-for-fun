@@ -1,3 +1,4 @@
+import math
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Self
@@ -69,7 +70,137 @@ PRETRAINED_CONFIG = {
 }
 
 
+class AttentionHead(nn.Module):
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        if config.embedding_size % config.num_heads != 0:
+            raise ValueError(
+                f"Embedding size {config.embedding_size} must be divisible by number of heads {config.num_heads}"
+            )
+        self.head_size = config.embedding_size // config.num_heads
+
+        self.query = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
+        self.key = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
+        self.value = nn.Linear(
+            config.embedding_size,
+            self.head_size,
+            bias=False,
+            device=config.device,
+        )
+
+        self.dropout = nn.Dropout(config.dropout)
+
+        self.tril: torch.Tensor
+        self.register_buffer(
+            "tril",
+            torch.tril(
+                torch.ones(
+                    config.sequence_length,
+                    config.sequence_length,
+                    device=config.device,
+                ),
+            ),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        x: [B, S, E]
+        return: [B, S, H] -- NOTE: this is H, not E
+        """
+        H = self.head_size
+
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        # shape: [B, S, H]
+        query = self.query(x)
+        assert_shape("query", query, (B, S, H))
+
+        # shape: [B, S, H]
+        key = self.key(x)
+        assert_shape("key", key, (B, S, H))
+
+        # shape: [B, S, H]
+        value = self.value(x)
+        assert_shape("value", value, (B, S, H))
+
+        # shape: [B, S, H] @ [B, H, S] -> [B, S, S]
+        attention = query @ key.transpose(-2, -1) * (self.head_size**-0.5)
+        attention = attention.masked_fill(self.tril[:S, :S] == 0, -math.inf)
+        attention = F.softmax(attention, dim=-1)
+        assert_shape("attention", attention, (B, S, S))
+
+        attention = self.dropout(attention)
+        assert_shape("attention", attention, (B, S, S))
+
+        # shape: [B, S, S] @ [B, S, H] -> [B, S, H]
+        output = attention @ value
+        assert_shape("output", output, (B, S, H))
+        return output
+
+
 class MultiHeadAttention(nn.Module):
+    def __init__(self, config: ModelConfig):
+        super().__init__()
+        self.num_heads = config.num_heads
+
+        self.heads = nn.ModuleList(
+            [AttentionHead(config) for _ in range(config.num_heads)]
+        )
+
+        self.projection = nn.Linear(
+            config.embedding_size,
+            config.embedding_size,
+            device=config.device,
+        )
+
+        self.dropout = nn.Dropout(config.dropout)
+
+        self.should_capture_output = False
+        self.use_frozen_output = False
+        self.register_buffer("frozen_output", None)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.should_capture_output and self.use_frozen_output:
+            previous_frozen_output = self.frozen_output
+            self.frozen_output = self._forward_impl(x)
+            return previous_frozen_output
+        elif self.use_frozen_output:
+            return self.frozen_output
+        elif self.should_capture_output:
+            self.frozen_output = self._forward_impl(x)
+            return self.frozen_output
+        else:
+            return self._forward_impl(x)
+
+    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
+        B, S, E = x.shape
+        assert_shape("x", x, (B, S, E))
+
+        # shape: [B, S, H * num_heads] = [B, S, E] since H = E // num_heads
+        output = torch.cat([head(x) for head in self.heads], dim=-1)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.projection(output)
+        assert_shape("output", output, (B, S, E))
+
+        output = self.dropout(output)
+        assert_shape("output", output, (B, S, E))
+
+        return output
+
+
+class MultiHeadFlashAttention(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
         if config.embedding_size % config.num_heads != 0:
@@ -122,19 +253,19 @@ class MultiHeadAttention(nn.Module):
         assert_shape("k", k, (B, S, E))
         assert_shape("v", v, (B, S, E))
 
-        # shape: [B, H, S, E // H]
+        # shape: [B, num_heads, S, E // num_heads]
         q = q.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("q", q, (B, self.num_heads, S, self.head_size))
 
-        # shape: [B, H, S, E // H]
+        # shape: [B, num_heads, S, E // num_heads]
         k = k.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("k", k, (B, self.num_heads, S, self.head_size))
 
-        # shape: [B, H, S, E // H]
+        # shape: [B, num_heads, S, E // num_heads]
         v = v.view(B, S, self.num_heads, self.head_size).transpose(1, 2)
         assert_shape("v", v, (B, self.num_heads, S, self.head_size))
 
-        # shape: [B, H, S, E // H]
+        # shape: [B, num_heads, S, E // num_heads]
         output = F.scaled_dot_product_attention(
             q,
             k,
