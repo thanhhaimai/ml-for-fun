@@ -91,7 +91,24 @@ class MultiHeadAttention(nn.Module):
         )
         self.dropout = nn.Dropout(config.dropout)
 
+        self.should_capture_output = False
+        self.use_frozen_output = False
+        self.register_buffer("frozen_output", None)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.should_capture_output and self.use_frozen_output:
+            previous_frozen_output = self.frozen_output
+            self.frozen_output = self._forward_impl(x)
+            return previous_frozen_output
+        elif self.use_frozen_output:
+            return self.frozen_output
+        elif self.should_capture_output:
+            self.frozen_output = self._forward_impl(x)
+            return self.frozen_output
+        else:
+            return self._forward_impl(x)
+
+    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: [B, S, E]
         return: [B, S, E]
@@ -235,9 +252,8 @@ class GPT2(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
         # [B, S, E] -> [B, S, E]
-        self.blocks = nn.ModuleList(
-            [Block(config) for _ in range(config.num_blocks)],
-        )
+        self._blocks = [Block(config) for _ in range(config.num_blocks)]
+        self.blocks = nn.ModuleList(self._blocks)
 
         self.layer_norm = nn.LayerNorm(config.embedding_size, device=config.device)
 
@@ -335,6 +351,14 @@ class GPT2(nn.Module):
             assert_shape("indices", indices, (B, original_S + 1))
 
         return indices
+
+    def set_capture_output(self, should_capture_output: bool):
+        for block in self._blocks:
+            block.attention.should_capture_output = should_capture_output
+
+    def set_use_frozen_output(self, use_frozen_output: bool):
+        for block in self._blocks:
+            block.attention.use_frozen_output = use_frozen_output
 
     @classmethod
     def from_pretrained(
