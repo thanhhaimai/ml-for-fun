@@ -339,7 +339,7 @@ class GPT2(nn.Module):
     @classmethod
     def from_pretrained(
         cls, pretrained_name: PretrainedName, device: torch.device
-    ) -> Self:
+    ) -> tuple[Self, GPT2LMHeadModel]:
         pretrained_model = GPT2LMHeadModel.from_pretrained(pretrained_name)
         pretrained_state = pretrained_model.state_dict()
 
@@ -400,7 +400,7 @@ class GPT2(nn.Module):
         model_state["linear.weight"] = pretrained_state["lm_head.weight"]
 
         model.load_state_dict(model_state)
-        return model
+        return model, pretrained_model
 
 
 @dataclass

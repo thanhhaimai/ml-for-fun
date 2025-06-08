@@ -15,7 +15,8 @@ When Mary and John went to the store, John gave a drink to | seed=42
 
 Observation: we might not have the same seed, but the claim of prob=0.68 seems high
 
-- Maybe I didn't fully reproduce GPT2 correctly?
+- Maybe I didn't fully reproduce GPT2 correctly? -- not the case
+  - Confirmed that the HF pretrained model output matched my model output
 - Maybe the GPT2 weights from HF is not 100% the same with the TensorFlow GPT2 version?
 
 Test 2: Slightly changes the sentence (names, store -> park, drink -> leaf)
@@ -65,4 +66,4 @@ Mary and John went to the store! Mary gave a drink to
 Observation: Doesn't work if it's "John gave", but works with "Mary gave"
 
 - This feels like the original research result might be more fragile than the paper implies
-- Between the 2 last sentences, we change "." -> ";", and it changes the logits quite a bit
+- Between the 3 last sentences, we change "." -> ";", and it changes the logits quite a bit
