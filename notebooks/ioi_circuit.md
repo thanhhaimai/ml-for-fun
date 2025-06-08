@@ -71,3 +71,10 @@ Observation: Doesn't work if it's "John gave", but works with "Mary gave"
 ## 2: Capturing attention outputs
 
 It turns out for path patching, Flash Attention is a road block. In Flash Attention, all the heads are merged together. However, we want to be able to freeze the output and patch each attention head independently.
+
+Test 1: Starts by patching all the attention heads at the last block, one by one
+
+Observation: can confirm the claim from the paper
+
+- Head [11][1] seems to be an Name Mover Head. Knocking it out reduce "Mary" logit.
+- Head [11][10] seems to be the Negative Name Mover Head. Knocking it out increases "Mary" logit

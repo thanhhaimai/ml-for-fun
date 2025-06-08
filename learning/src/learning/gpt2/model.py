@@ -109,7 +109,24 @@ class AttentionHead(nn.Module):
             ),
         )
 
+        self.should_capture_output = False
+        self.use_frozen_output = False
+        self.register_buffer("frozen_output", None)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.should_capture_output and self.use_frozen_output:
+            previous_frozen_output = self.frozen_output
+            self.frozen_output = self._forward_impl(x)
+            return previous_frozen_output
+        elif self.use_frozen_output:
+            return self.frozen_output
+        elif self.should_capture_output:
+            self.frozen_output = self._forward_impl(x)
+            return self.frozen_output
+        else:
+            return self._forward_impl(x)
+
+    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: [B, S, E]
         return: [B, S, H] -- NOTE: this is H, not E
@@ -151,9 +168,8 @@ class MultiHeadAttention(nn.Module):
         super().__init__()
         self.num_heads = config.num_heads
 
-        self.heads = nn.ModuleList(
-            [AttentionHead(config) for _ in range(config.num_heads)]
-        )
+        self.heads = [AttentionHead(config) for _ in range(config.num_heads)]
+        self.heads_module = nn.ModuleList(self.heads)
 
         self.projection = nn.Linear(
             config.embedding_size,
@@ -163,29 +179,12 @@ class MultiHeadAttention(nn.Module):
 
         self.dropout = nn.Dropout(config.dropout)
 
-        self.should_capture_output = False
-        self.use_frozen_output = False
-        self.register_buffer("frozen_output", None)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.should_capture_output and self.use_frozen_output:
-            previous_frozen_output = self.frozen_output
-            self.frozen_output = self._forward_impl(x)
-            return previous_frozen_output
-        elif self.use_frozen_output:
-            return self.frozen_output
-        elif self.should_capture_output:
-            self.frozen_output = self._forward_impl(x)
-            return self.frozen_output
-        else:
-            return self._forward_impl(x)
-
-    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         B, S, E = x.shape
         assert_shape("x", x, (B, S, E))
 
         # shape: [B, S, H * num_heads] = [B, S, E] since H = E // num_heads
-        output = torch.cat([head(x) for head in self.heads], dim=-1)
+        output = torch.cat([head(x) for head in self.heads_module], dim=-1)
         assert_shape("output", output, (B, S, E))
 
         output = self.projection(output)
@@ -362,6 +361,7 @@ class GPT2(nn.Module):
         self.sequence_length = config.sequence_length
         self.vocab_size = config.vocab_size
         self.embedding_size = config.embedding_size
+        self.config = config
 
         # [B, S] of vocab index -> [B, S, E]
         self.embedding = nn.Embedding(
@@ -380,8 +380,8 @@ class GPT2(nn.Module):
         self.dropout = nn.Dropout(config.dropout)
 
         # [B, S, E] -> [B, S, E]
-        self._blocks = [Block(config) for _ in range(config.num_blocks)]
-        self.blocks = nn.ModuleList(self._blocks)
+        self.blocks = [Block(config) for _ in range(config.num_blocks)]
+        self.blocks_module = nn.ModuleList(self.blocks)
 
         self.layer_norm = nn.LayerNorm(config.embedding_size, device=config.device)
 
@@ -433,7 +433,7 @@ class GPT2(nn.Module):
         assert_shape("embedding", embedding, (B, S, E))
 
         # shape: [B, S, E]
-        for block in self.blocks:
+        for block in self.blocks_module:
             embedding = block(embedding)
             assert_shape("embedding", embedding, (B, S, E))
 
@@ -481,12 +481,14 @@ class GPT2(nn.Module):
         return indices
 
     def set_capture_output(self, should_capture_output: bool):
-        for block in self._blocks:
-            block.attention.should_capture_output = should_capture_output
+        for block in self.blocks:
+            for head in block.attention.heads:
+                head.should_capture_output = should_capture_output
 
     def set_use_frozen_output(self, use_frozen_output: bool):
-        for block in self._blocks:
-            block.attention.use_frozen_output = use_frozen_output
+        for block in self.blocks:
+            for head in block.attention.heads:
+                head.use_frozen_output = use_frozen_output
 
     @classmethod
     def from_pretrained(
@@ -510,10 +512,10 @@ class GPT2(nn.Module):
         # Linear shape: [n_out, n_in]
         # So we need to transpose the weights to match our Linear layer
         for i in range(pretrained_config.num_blocks):
-            model_state[f"blocks.{i}.layer_norm1.weight"] = pretrained_state[
+            model_state[f"blocks_module.{i}.layer_norm1.weight"] = pretrained_state[
                 f"transformer.h.{i}.ln_1.weight"
             ]
-            model_state[f"blocks.{i}.layer_norm1.bias"] = pretrained_state[
+            model_state[f"blocks_module.{i}.layer_norm1.bias"] = pretrained_state[
                 f"transformer.h.{i}.ln_1.bias"
             ]
 
@@ -543,49 +545,49 @@ class GPT2(nn.Module):
 
                 # For each head, extract the corresponding slice and transpose for Linear layer
                 # q_weight[start_idx:end_idx, :] gives [head_size, E] which is correct for Linear
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.query.weight"] = (
-                    q_weight[start_idx:end_idx, :]
-                )
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.query.bias"] = (
-                    q_bias[start_idx:end_idx]
-                )
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.key.weight"] = (
-                    k_weight[start_idx:end_idx, :]
-                )
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.key.bias"] = k_bias[
-                    start_idx:end_idx
-                ]
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.value.weight"] = (
-                    v_weight[start_idx:end_idx, :]
-                )
-                model_state[f"blocks.{i}.attention.heads.{head_idx}.value.bias"] = (
-                    v_bias[start_idx:end_idx]
-                )
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.query.weight"
+                ] = q_weight[start_idx:end_idx, :]
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.query.bias"
+                ] = q_bias[start_idx:end_idx]
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.key.weight"
+                ] = k_weight[start_idx:end_idx, :]
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.key.bias"
+                ] = k_bias[start_idx:end_idx]
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.value.weight"
+                ] = v_weight[start_idx:end_idx, :]
+                model_state[
+                    f"blocks_module.{i}.attention.heads_module.{head_idx}.value.bias"
+                ] = v_bias[start_idx:end_idx]
 
-            model_state[f"blocks.{i}.attention.projection.weight"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_proj.weight"
-            ].T
-            model_state[f"blocks.{i}.attention.projection.bias"] = pretrained_state[
-                f"transformer.h.{i}.attn.c_proj.bias"
-            ]
-            model_state[f"blocks.{i}.layer_norm2.weight"] = pretrained_state[
+            model_state[f"blocks_module.{i}.attention.projection.weight"] = (
+                pretrained_state[f"transformer.h.{i}.attn.c_proj.weight"].T
+            )
+            model_state[f"blocks_module.{i}.attention.projection.bias"] = (
+                pretrained_state[f"transformer.h.{i}.attn.c_proj.bias"]
+            )
+            model_state[f"blocks_module.{i}.layer_norm2.weight"] = pretrained_state[
                 f"transformer.h.{i}.ln_2.weight"
             ]
-            model_state[f"blocks.{i}.layer_norm2.bias"] = pretrained_state[
+            model_state[f"blocks_module.{i}.layer_norm2.bias"] = pretrained_state[
                 f"transformer.h.{i}.ln_2.bias"
             ]
-            model_state[f"blocks.{i}.feed_forward.linear.weight"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_fc.weight"
-            ].T
-            model_state[f"blocks.{i}.feed_forward.linear.bias"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_fc.bias"
-            ]
-            model_state[f"blocks.{i}.feed_forward.projection.weight"] = (
+            model_state[f"blocks_module.{i}.feed_forward.linear.weight"] = (
+                pretrained_state[f"transformer.h.{i}.mlp.c_fc.weight"].T
+            )
+            model_state[f"blocks_module.{i}.feed_forward.linear.bias"] = (
+                pretrained_state[f"transformer.h.{i}.mlp.c_fc.bias"]
+            )
+            model_state[f"blocks_module.{i}.feed_forward.projection.weight"] = (
                 pretrained_state[f"transformer.h.{i}.mlp.c_proj.weight"].T
             )
-            model_state[f"blocks.{i}.feed_forward.projection.bias"] = pretrained_state[
-                f"transformer.h.{i}.mlp.c_proj.bias"
-            ]
+            model_state[f"blocks_module.{i}.feed_forward.projection.bias"] = (
+                pretrained_state[f"transformer.h.{i}.mlp.c_proj.bias"]
+            )
 
         model_state["layer_norm.weight"] = pretrained_state["transformer.ln_f.weight"]
         model_state["layer_norm.bias"] = pretrained_state["transformer.ln_f.bias"]
