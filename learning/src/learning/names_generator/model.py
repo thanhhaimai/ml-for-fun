@@ -9,6 +9,19 @@ from learning.learner import BatchResult, Learner
 from learning.names_generator.names_generator_dataset import NameSample
 
 
+@dataclass
+class Config:
+    batch_size: int
+    learning_rate: float
+    epochs: int
+    patience: int
+    min_delta: float
+    hidden_size: int
+    num_vocab: int
+    num_classes: int
+    device: torch.device
+
+
 class MLP(nn.Module):
     def __init__(self, input_size: int, output_size: int, dropout: float):
         super().__init__()
@@ -124,8 +137,9 @@ class ParallelBatchLearner(Learner):
         optimizer: optim.Optimizer,
         criterion: nn.Module,
         padding_idx: int,
+        device: torch.device,
     ):
-        super().__init__(model, optimizer, criterion)
+        super().__init__(model, optimizer, criterion, device=device)
         self.padding_idx = padding_idx
         assert self.criterion.reduction == "sum", "Reduction must be 'sum'"
 

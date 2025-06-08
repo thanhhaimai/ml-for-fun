@@ -33,7 +33,8 @@ def real_data_dir():
 
 
 def test_basic(test_dir, tokenizer: Tokenizer):
-    ds = NamesDataSource.load(str(test_dir), tokenizer=tokenizer)
+    ds = NamesDataSource.load(str(test_dir))
+    tokenizer.load(ds.vocab)
     dataset = NamesClassifierDataset(ds, tokenizer=tokenizer)
     assert len(dataset) == 4
     sample = dataset[0]
@@ -43,14 +44,16 @@ def test_basic(test_dir, tokenizer: Tokenizer):
 
 
 def test_out_of_range(test_dir, tokenizer: Tokenizer):
-    ds = NamesDataSource.load(str(test_dir), tokenizer=tokenizer)
+    ds = NamesDataSource.load(str(test_dir))
+    tokenizer.load(ds.vocab)
     dataset = NamesClassifierDataset(ds, tokenizer=tokenizer)
     with pytest.raises(IndexError):
         _ = dataset[100]
 
 
 def test_real_data(real_data_dir, tokenizer: Tokenizer):
-    ds = NamesDataSource.load(real_data_dir, tokenizer=tokenizer)
+    ds = NamesDataSource.load(real_data_dir)
+    tokenizer.load(ds.vocab)
     dataset = NamesClassifierDataset(ds, tokenizer=tokenizer)
     assert len(dataset) > 0
     sample = dataset[0]
@@ -62,7 +65,7 @@ def test_real_data(real_data_dir, tokenizer: Tokenizer):
 def test_empty_folder(tmp_path, tokenizer: Tokenizer):
     empty_dir = tmp_path / "empty"
     empty_dir.mkdir()
-    ds = NamesDataSource.load(str(empty_dir), tokenizer=tokenizer)
+    ds = NamesDataSource.load(str(empty_dir))
     assert ds.num_classes == 0
     assert ds.countries == []
     assert ds.country_idx_to_names == {}

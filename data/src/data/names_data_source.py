@@ -5,8 +5,6 @@ from typing import Self
 
 import matplotlib.pyplot as plt
 
-from data.tokenizer import Tokenizer
-
 
 def unicode_to_ascii(s: str) -> str:
     """
@@ -31,18 +29,17 @@ class NamesDataSource:
         self,
         names: dict[int, list[str]],
         countries: list[str],
-        tokenizer: Tokenizer,
+        vocab: list[str],
     ):
         self.country_idx_to_names = names
         self.countries = countries
-        self.tokenizer = tokenizer
+        self.vocab = vocab
         self.num_classes = len(self.countries)
 
     @classmethod
     def load(
         cls,
         data_folder: str,
-        tokenizer: Tokenizer,
         normalize_unicode: bool = False,
         lowercase: bool = False,
     ) -> Self:
@@ -77,8 +74,8 @@ class NamesDataSource:
 
             data[country_idx].extend(sorted(names))
 
-        tokenizer.load(vocab)
-        return cls(data, all_countries, tokenizer)
+        vocab = list(sorted(vocab))
+        return cls(data, all_countries, vocab)
 
     @property
     def class_frequency(self) -> list[float]:
@@ -90,7 +87,7 @@ class NamesDataSource:
         for names in self.country_idx_to_names.values():
             for name in names:
                 counter.update(name)
-        return [counter[token] for token in self.tokenizer.index_to_token]
+        return [counter[token] for token in self.vocab]
 
     def plot_class_frequency(self, fig_size: tuple[int, int]):
         f, ax = plt.subplots(figsize=fig_size)
@@ -107,7 +104,7 @@ class NamesDataSource:
         ax.set_title("Token Frequency")
         ax.set_xlabel("Token")
         ax.set_ylabel("Frequency")
-        ax.set_xticks(range(len(self.tokenizer.index_to_token)))
-        ax.set_xticklabels(self.tokenizer.index_to_token, rotation=45, ha="right")
-        ax.bar(range(len(self.tokenizer.index_to_token)), self.token_frequency)
+        ax.set_xticks(range(len(self.vocab)))
+        ax.set_xticklabels(self.vocab, rotation=45, ha="right")
+        ax.bar(range(len(self.vocab)), self.token_frequency)
         plt.show()

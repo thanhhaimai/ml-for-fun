@@ -42,12 +42,14 @@ class NamesGeneratorDataset(Dataset[NameSample]):
         self,
         names_data_source: NamesDataSource,
         tokenizer: Tokenizer,
+        device: torch.device = torch.device("cpu"),
     ):
         self.names_data_source = names_data_source
+        self.device = device
         self.samples: list[NameSample] = []
 
         # shape: [1, V]
-        start_token_one_hot = tokenizer.to_one_hot(Tokenizer.START_TOKEN)
+        start_token_one_hot = tokenizer.to_one_hot(Tokenizer.START_TOKEN, device=device)
         end_token_idx = tokenizer.token_to_index[Tokenizer.END_TOKEN]
 
         for country_idx, names in names_data_source.country_idx_to_names.items():
@@ -56,7 +58,7 @@ class NamesGeneratorDataset(Dataset[NameSample]):
                 input = torch.cat(
                     [
                         start_token_one_hot,
-                        tokenizer.to_one_hot(name),
+                        tokenizer.to_one_hot(name, device=device),
                     ],
                     dim=0,
                 )
@@ -64,7 +66,7 @@ class NamesGeneratorDataset(Dataset[NameSample]):
                 label_indices = [tokenizer.token_to_index[c] for c in name] + [
                     end_token_idx
                 ]
-                label = torch.tensor(label_indices, dtype=torch.long)
+                label = torch.tensor(label_indices, dtype=torch.long, device=device)
 
                 # shape: [1, C]
                 category = self.country_index_to_one_hot(country_idx).unsqueeze(0)
@@ -88,6 +90,6 @@ class NamesGeneratorDataset(Dataset[NameSample]):
         return: shape [num_classes]
         """
         return F.one_hot(
-            torch.tensor(country_idx),
+            torch.tensor(country_idx, device=self.device),
             num_classes=self.names_data_source.num_classes,
         ).float()

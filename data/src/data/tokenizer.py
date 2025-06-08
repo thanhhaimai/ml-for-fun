@@ -28,9 +28,8 @@ class Tokenizer:
         if use_end_token:
             self._special_tokens.append(self.END_TOKEN)
 
-    def load(self, data: set):
-        self.data = data
-        self.index_to_token = self._special_tokens + list(sorted(self.data))
+    def load(self, data: list[str]):
+        self.index_to_token = self._special_tokens + data
         self.token_to_index: dict[str, int] = {
             c: i for i, c in enumerate(self.index_to_token)
         }

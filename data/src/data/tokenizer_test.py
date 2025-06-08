@@ -7,10 +7,8 @@ from data.tokenizer import Tokenizer
 @pytest.fixture
 def tokenizer() -> Tokenizer:
     t = Tokenizer()
-    data = set()
-    data.update("hello")
-    data.update("world")
-    t.load(data)
+    vocab = set("hello") | set("world")
+    t.load(sorted(vocab))
     return t
 
 
@@ -24,10 +22,8 @@ def test_load(tokenizer: Tokenizer):
 
 def test_load_start_end():
     tokenizer = Tokenizer(use_start_token=True, use_end_token=True)
-    data = set()
-    data.update("hello")
-    data.update("world")
-    tokenizer.load(data)
+    vocab = set("hello") | set("world")
+    tokenizer.load(sorted(vocab))
     assert set(tokenizer.index_to_token) == set("helowrd") | {
         Tokenizer.PAD_TOKEN,
         Tokenizer.START_TOKEN,
@@ -95,11 +91,8 @@ def test_to_one_hot_batch(tokenizer: Tokenizer):
 
 def test_to_one_hot_batch_different_lengths():
     t = Tokenizer()
-    data = set()
-    data.update("abc")
-    data.update("de")
-    data.update("fghi")
-    t.load(data)
+    vocab = set("abc") | set("de") | set("fghi")
+    t.load(sorted(vocab))
     sentences = ["abc", "de", "f", "abcdghi"]
     one_hots = t.to_one_hot_batch(sentences, batch_dim=0)
     assert one_hots.shape == (4, 7, t.vocab_size)

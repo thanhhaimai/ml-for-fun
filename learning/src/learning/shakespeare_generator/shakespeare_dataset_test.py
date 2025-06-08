@@ -33,7 +33,9 @@ def shakespeare_data_source(
     shakespeare_file_and_content, tokenizer: Tokenizer
 ) -> ShakespeareDataSource:
     file_path, _ = shakespeare_file_and_content
-    return ShakespeareDataSource.load(file_path, tokenizer)
+    ds = ShakespeareDataSource.load(file_path)
+    tokenizer.load(ds.vocab)
+    return ds
 
 
 def test_basic_dataset_creation(
@@ -93,7 +95,8 @@ def test_empty_file(tmp_path, tokenizer: Tokenizer):
     empty_file = tmp_path / "empty.txt"
     empty_file.write_text("")
 
-    empty_ds = ShakespeareDataSource.load(str(empty_file), tokenizer)
+    empty_ds = ShakespeareDataSource.load(str(empty_file))
+    tokenizer.load(empty_ds.vocab)
     # Tokenizer will have PAD_TOKEN
     assert tokenizer.vocab_size > 0
 
