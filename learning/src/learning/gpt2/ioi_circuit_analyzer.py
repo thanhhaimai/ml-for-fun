@@ -12,21 +12,39 @@ def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
 
 
-class Sampler:
+class NameSampler:
     def __init__(self, names: list[str]):
         self.names = names
 
-    def abc(self, template: str) -> str:
-        s1, s2, s3 = random.sample(self.names, 3)
-        return template.format(s1=s1, s2=s2, s3=s3)
+    def sample(self, num_names: int) -> list[str]:
+        return random.sample(self.names, num_names)
 
-    def aba(self, template: str) -> str:
-        s1, s2 = random.sample(self.names, 2)
-        return template.format(s1=s1, s2=s2, s3=s1)
 
-    def abb(self, template: str) -> str:
-        s1, s2 = random.sample(self.names, 2)
-        return template.format(s1=s1, s2=s2, s3=s2)
+class PromptTemplate:
+    def __init__(self, template: str, name_sampler: NameSampler):
+        self.template = template
+        self.name_sampler = name_sampler
+
+    def sample_abc(self) -> str:
+        s1, s2, s3 = self.name_sampler.sample(3)
+        return self.template.format(s1=s1, s2=s2, s3=s3)
+
+    def sample_aba(self) -> str:
+        s1, s2 = self.name_sampler.sample(2)
+        return self.template.format(s1=s1, s2=s2, s3=s1)
+
+    def sample_abb(self) -> str:
+        s1, s2 = self.name_sampler.sample(2)
+        return self.template.format(s1=s1, s2=s2, s3=s2)
+
+    def from_abc(self, s1, s2, s3) -> str:
+        return self.template.format(s1=s1, s2=s2, s3=s3)
+
+    def from_aba(self, s1, s2) -> str:
+        return self.template.format(s1=s1, s2=s2, s3=s1)
+
+    def from_abb(self, s1, s2) -> str:
+        return self.template.format(s1=s1, s2=s2, s3=s2)
 
 
 @dataclass
@@ -40,12 +58,12 @@ class IoiCircuitAnalyzer:
         self,
         model: GPT2,
         tokenizer: tiktoken.Encoding,
-        sampler: Sampler,
+        prompt_template: PromptTemplate,
         device: torch.device,
     ):
         self.model = model
         self.tokenizer = tokenizer
-        self.sampler = sampler
+        self.prompt_template = prompt_template
         self.device = device
 
     @torch.no_grad()
@@ -89,9 +107,7 @@ class IoiCircuitAnalyzer:
 
         return last_output
 
-    def capture_baseline_output(
-        self, template: str, batch_size: int
-    ) -> list[list[torch.Tensor]]:
+    def capture_baseline_output(self, batch_size: int) -> list[list[torch.Tensor]]:
         """
         Runs the model `batch_size` times with the same template (different names)
         and captures the output of all the heads in all the blocks.
@@ -108,7 +124,7 @@ class IoiCircuitAnalyzer:
         """
         self.model.set_capture_output(True)
         self.model.set_use_frozen_output(False)
-        cases = [self.sampler.abc(template) for _ in range(batch_size)]
+        cases = [self.prompt_template.sample_abc() for _ in range(batch_size)]
         indices = self.tokenizer.encode_batch(cases)
         self.forward(indices)
 
@@ -134,4 +150,8 @@ class IoiCircuitAnalyzer:
             results.append(block_results)
 
         self.model.set_capture_output(False)
+        self.baseline_output = results
         return results
+
+    def analyze_head(self, block_idx: int, head_idx: int):
+        pass

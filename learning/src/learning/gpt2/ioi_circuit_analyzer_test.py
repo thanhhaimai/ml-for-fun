@@ -2,7 +2,11 @@ import pytest
 import tiktoken
 import torch
 
-from learning.gpt2.ioi_circuit_analyzer import IoiCircuitAnalyzer, Sampler
+from learning.gpt2.ioi_circuit_analyzer import (
+    IoiCircuitAnalyzer,
+    NameSampler,
+    PromptTemplate,
+)
 from learning.gpt2.model import GPT2, PretrainedName
 
 
@@ -21,8 +25,8 @@ def tokenizer() -> tiktoken.Encoding:
 
 
 @pytest.fixture
-def sampler() -> Sampler:
-    return Sampler(names=["Mary", "John", "store", "drink"])
+def sampler() -> NameSampler:
+    return NameSampler(names=["Mary", "John", "Tom", "Jerry"])
 
 
 @pytest.fixture
@@ -31,13 +35,17 @@ def device() -> torch.device:
 
 
 def test_topk_logits(
-    model: GPT2, tokenizer: tiktoken.Encoding, sampler: Sampler, device: torch.device
+    model: GPT2,
+    tokenizer: tiktoken.Encoding,
+    sampler: NameSampler,
+    device: torch.device,
 ):
-    analyzer = IoiCircuitAnalyzer(model, tokenizer, sampler, device)
-    result = analyzer.topk_logits(
-        prompt="When Mary and John went to the store, John gave a drink to",
-        k=1,
+    prompt_template = PromptTemplate(
+        template="When {s1} and {s2} went to the store, {s3} gave a drink to",
+        name_sampler=sampler,
     )
+    analyzer = IoiCircuitAnalyzer(model, tokenizer, prompt_template, device)
+    result = analyzer.topk_logits(prompt_template.from_abb("Mary", "John"), k=1)
 
     assert len(result.top_probs) == 1
     assert len(result.top_indices) == 1
