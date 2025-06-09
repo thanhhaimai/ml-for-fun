@@ -219,8 +219,8 @@ class IoiCircuitAnalyzer:
         original_probs = original_probs.squeeze(0)
         patched_probs = patched_probs.squeeze(0)
 
-        s1_idx = self.tokenizer.encode(f" {s1.strip()}")[0]
-        s2_idx = self.tokenizer.encode(f" {s2.strip()}")[0]
+        s1_idx = indices[0][0]
+        s2_idx = indices[0][1]
         ioi_metrics = IoiMetrics.from_probs(
             original_probs, patched_probs, s1_idx, s2_idx
         )
