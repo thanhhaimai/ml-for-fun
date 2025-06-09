@@ -45,7 +45,7 @@ def test_topk_logits(
         name_sampler=sampler,
     )
     analyzer = IoiCircuitAnalyzer(model, tokenizer, prompt_template, device)
-    result = analyzer.topk_logits(prompt_template.from_abb("Mary", "John"), k=1)
+    result = analyzer.topk_probs(prompt_template.from_abb("Mary", "John"), k=1)
 
     assert len(result.top_probs) == 1
     assert len(result.top_indices) == 1

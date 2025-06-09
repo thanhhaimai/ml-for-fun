@@ -215,3 +215,37 @@ This means the result might changes depending on the languages. Right now we're 
 Specifically: the head outputs are now run on 128 random name samples, then its `mean` is being captured for Path Patching as the baseline.
 
 No new research observation beside the name itself really influences the logits. Not all names are equal.
+
+## 7: Metrics time
+
+Implemented:
+
+- KL Divergence
+- Jensen-Shannon Divergence
+- Total Variation Distance
+- L2 Distance
+
+Observation (for the last block)
+
+- Head 10 is Negative Name Mover head
+- Head 1 and Head 2 both contributes largely to the "Mary" output
+
+```python
+When Mary and John went to the store, John gave a drink to
+
+================================================================================
+SUMMARY: Most impactful heads (by KL divergence)
+================================================================================
+#1  Head [11][10]  KL: 0.1395 TV: 0.2426 L2: 0.2691 Mary prob: -0.2424 John prob: 0.0054 Logit diff: -0.5275 
+#2  Head [11][1]  KL: 0.0753 TV: 0.1808 L2: 0.1767 Mary prob: 0.1469 John prob: 0.0324 Logit diff: -0.3763 
+#3  Head [11][2]  KL: 0.0360 TV: 0.1259 L2: 0.1393 Mary prob: 0.1255 John prob: -0.0022 Logit diff: 0.3666 
+#4  Head [11][3]  KL: 0.0185 TV: 0.0921 L2: 0.0999 Mary prob: 0.0895 John prob: -0.0087 Logit diff: 0.3589 
+#5  Head [11][6]  KL: 0.0062 TV: 0.0533 L2: 0.0588 Mary prob: 0.0530 John prob: -0.0028 Logit diff: 0.1713 
+#6  Head [11][8]  KL: 0.0046 TV: 0.0326 L2: 0.0243 Mary prob: -0.0149 John prob: 0.0057 Logit diff: -0.1336 
+#7  Head [11][11]  KL: 0.0032 TV: 0.0388 L2: 0.0398 Mary prob: 0.0348 John prob: 0.0033 Logit diff: 0.0242 
+#8  Head [11][0]  KL: 0.0008 TV: 0.0160 L2: 0.0122 Mary prob: -0.0084 John prob: -0.0030 Logit diff: 0.0299 
+#9  Head [11][9]  KL: 0.0006 TV: 0.0164 L2: 0.0171 Mary prob: 0.0154 John prob: -0.0001 Logit diff: 0.0368 
+#10  Head [11][7]  KL: 0.0005 TV: 0.0144 L2: 0.0151 Mary prob: -0.0138 John prob: 0.0001 Logit diff: -0.0329 
+#11  Head [11][5]  KL: 0.0002 TV: 0.0067 L2: 0.0045 Mary prob: -0.0025 John prob: 0.0027 Logit diff: -0.0516 
+#12  Head [11][4]  KL: 0.0001 TV: 0.0049 L2: 0.0037 Mary prob: -0.0034 John prob: 0.0002 Logit diff: -0.0114
+```
