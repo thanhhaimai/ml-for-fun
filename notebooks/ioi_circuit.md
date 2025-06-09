@@ -15,8 +15,7 @@ When Mary and John went to the store, John gave a drink to | seed=42
 
 Observation: we might not have the same seed, but the claim of prob=0.68 seems high
 
-- Maybe I didn't fully reproduce GPT2 correctly? -- not the case
-  - Confirmed that the HF pretrained model output matched my model output
+- Maybe I didn't fully reproduce GPT2 correctly? -- see (3:) for update
 - Maybe the GPT2 weights from HF is not 100% the same with the TensorFlow GPT2 version? Not sure if the paper uses pytorch GPT2 or TF GPT2.
 
 Test 2: Slightly changes the sentence (names, store -> park, drink -> leaf)
@@ -65,7 +64,7 @@ Mary and John went to the store! Mary gave a drink to
 
 Observation: Doesn't work if it's "John gave", but works with "Mary gave"
 
-- This feels like the original research result might be more fragile than the paper implies
+- This feels like the original research result might be more fragile than the paper implies -- see (4:) for update
 - Between the 3 last sentences, we change "." -> ";" -> "!", and it changes the logits quite a bit
 
 ## 2: Capturing attention outputs
@@ -143,3 +142,76 @@ NOTE: the above results were from _one_ set of sample. It's better to curate a d
 Wrote new `model_test.py`, which detected logits differences between `model` and `pretrained_model`. That means we were not as close to GPT2 as we thought. The main root cause is `GELU`. HF used the approximation form, and we didn't.
 
 Fixed the bug and re-run the notebook. The result doesn't change much (mostly the smaller probs that were changed, not the topk)
+
+## 4: Fix case template
+
+While working on the analyzer, I noticed that the starts token for the 2 sentences case above is not correct. It was without " ".
+
+To get a proper 2 sentences case, we should have another word before the name:
+
+```python
+Yesterday Mary and John went to the store. John gave a drink to
+0.74  Mary
+0.06  them
+0.04  the
+Yesterday Mary and John went to the store; John gave a drink to
+0.66  Mary
+0.10  them
+0.05  John
+Yesterday Mary and John went to the store! John gave a drink to
+0.55  Mary
+0.08  them
+0.06  the
+Yesterday Mary and John went to the store. Mary gave a drink to
+0.43  John
+0.11  them
+0.10  the
+Yesterday Mary and John went to the store; Mary gave a drink to
+0.35  John
+0.18  them
+0.11  Mary
+Yesterday Mary and John went to the store! Mary gave a drink to
+0.37  John
+0.13  the
+0.09  them
+```
+
+Observation: now the network correctly predicts the next token " John" and " Mary"
+
+## 5: Test with more names
+
+Given the following 3 templates:
+
+```python
+    cases = [
+        "When {s1} and {s2} went to the store, {s3} gave a drink to",
+        "When {s1} and {s2} went to the park, {s3} gave a leaf to",
+        "Yesterday {s1} and {s2} went to the store. {s3} gave a drink to",
+    ]
+```
+
+We run the tests with random (valid) English names, with 3 forms:
+
+- ABC: all 3 names are different
+- ABA: only 2 names, the last name is the same with the first name
+- ABB: only 2 names, the last name is the same with the second name
+
+Expectation: for all 3 templates
+
+- ABC: no provided name should appear in the top logits
+- ABA: predicts B as the top logit
+- ABB: predicts A as the top logit
+
+Observation:
+
+- ABC: as expected, the most common logit is " the"
+- ABA: for most cases, the correct name A is predicted as the top logit. However, it depends a lot on the names itself. For example, "Davis" and "May" didn't work out.
+- ABB: for most cases, the correct name B is predicted. Same above, it depends on the names
+
+This means the result might changes depending on the languages. Right now we're focusing on testing English names only.
+
+## 6: Capture outputs across a large ABC batch before running Path Patching
+
+Specifically: the head outputs are now run on 128 random name samples, then its `mean` is being captured for Path Patching as the baseline.
+
+No new research observation beside the name itself really influences the logits. Not all names are equal.

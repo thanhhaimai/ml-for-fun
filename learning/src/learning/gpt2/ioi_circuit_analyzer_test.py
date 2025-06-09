@@ -2,7 +2,7 @@ import pytest
 import tiktoken
 import torch
 
-from learning.gpt2.ioi_circuit_analyzer import IoiCircuitAnalyzer
+from learning.gpt2.ioi_circuit_analyzer import IoiCircuitAnalyzer, Sampler
 from learning.gpt2.model import GPT2, PretrainedName
 
 
@@ -21,12 +21,19 @@ def tokenizer() -> tiktoken.Encoding:
 
 
 @pytest.fixture
+def sampler() -> Sampler:
+    return Sampler(names=["Mary", "John", "store", "drink"])
+
+
+@pytest.fixture
 def device() -> torch.device:
     return torch.device("cpu")
 
 
-def test_topk_logits(model: GPT2, tokenizer: tiktoken.Encoding, device: torch.device):
-    analyzer = IoiCircuitAnalyzer(model, tokenizer, device)
+def test_topk_logits(
+    model: GPT2, tokenizer: tiktoken.Encoding, sampler: Sampler, device: torch.device
+):
+    analyzer = IoiCircuitAnalyzer(model, tokenizer, sampler, device)
     result = analyzer.topk_logits(
         prompt="When Mary and John went to the store, John gave a drink to",
         k=1,
