@@ -1,25 +1,17 @@
 import random
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import tiktoken
 import torch
 
-from learning.gpt2.metrics import IoiMetrics
+from learning.gpt2.metrics import DiffLogitsMetrics
 from learning.gpt2.model import GPT2
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
     if tensor.shape != shape:
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
-
-
-@dataclass
-class HeadAnalysisResult:
-    """Results from analyzing a specific attention head"""
-
-    original_probs: torch.Tensor
-    patched_probs: torch.Tensor
-    metrics: IoiMetrics
 
 
 class NameSampler:
@@ -29,11 +21,23 @@ class NameSampler:
     def sample(self, num_names: int) -> list[str]:
         return random.sample(self.names, num_names)
 
+    def sample_batch(self, num_names: int, batch_size: int) -> list[list[str]]:
+        return [self.sample(num_names) for _ in range(batch_size)]
+
 
 class PromptTemplate:
     def __init__(self, template: str, name_sampler: NameSampler):
         self.template = template
         self.name_sampler = name_sampler
+
+    def sample_batch_abc(self, batch_size: int) -> list[str]:
+        return [self.sample_abc() for _ in range(batch_size)]
+
+    def sample_batch_aba(self, batch_size: int) -> list[str]:
+        return [self.sample_aba() for _ in range(batch_size)]
+
+    def sample_batch_abb(self, batch_size: int) -> list[str]:
+        return [self.sample_abb() for _ in range(batch_size)]
 
     def sample_abc(self) -> str:
         s1, s2, s3 = self.name_sampler.sample(3)
@@ -64,13 +68,44 @@ class TopKProbsResult:
 
 
 @dataclass
-class CapturedOutput:
+class CapturedOutputV1:
     # Mean of the head outputs
     # indexed by block_idx and head_idx
     head_outputs: list[list[torch.Tensor]]
 
     # Mean of the final probs
     probs: torch.Tensor
+
+
+@dataclass
+class CapturedOutput:
+    # Mean of the head outputs
+    # indexed by block_idx and head_idx
+    head_outputs: list[list[torch.Tensor]]
+
+    # Mean of the final logits
+    logits: torch.Tensor
+
+
+class HeadId(NamedTuple):
+    block_idx: int
+    head_idx: int
+
+
+@dataclass
+class PathPatchingConfig:
+    batch_size: int
+    start_head: HeadId
+    end_heads: list[HeadId]
+
+
+@dataclass
+class HeadAnalysisResult:
+    original_probs: torch.Tensor
+    patched_probs: torch.Tensor
+    s1_indices: torch.Tensor
+    s2_indices: torch.Tensor
+    # metrics: DiffLogitsMetrics
 
 
 class IoiCircuitAnalyzer:
@@ -86,14 +121,14 @@ class IoiCircuitAnalyzer:
         self.prompt_template = prompt_template
         self.device = device
 
-        self.baseline_output: CapturedOutput | None = None
-
         self.V = self.model.config.vocab_size
         self.H = self.model.config.embedding_size // self.model.config.num_heads
 
     def topk_probs(self, prompt: str, k: int) -> TopKProbsResult:
-        indices = [self.tokenizer.encode(prompt)]
-        probs = self.forward(indices)
+        logits = self.forward([prompt])
+        assert_shape("logits", logits, (1, self.V))
+
+        probs = torch.softmax(logits, dim=-1)
         assert_shape("probs", probs, (1, self.V))
 
         top_probs, top_indices = torch.topk(probs.squeeze(0), k=k)
@@ -106,8 +141,9 @@ class IoiCircuitAnalyzer:
         )
 
     @torch.no_grad()
-    def forward(self, indices: list[list[int]]):
+    def forward(self, prompts: list[str]):
         self.model.eval()
+        indices = self.tokenizer.encode_batch(prompts)
         B = len(indices)
         S = len(indices[0])
 
@@ -123,110 +159,287 @@ class IoiCircuitAnalyzer:
         last_output = outputs[:, -1, :]
         assert_shape("last_output", last_output, (B, self.V))
 
-        # shape: [B, V]
-        probs = torch.softmax(last_output, dim=-1)
-        assert_shape("probs", probs, (B, self.V))
+        return last_output
 
-        return probs
-
-    def capture_baseline_output(self, batch_size: int):
-        """
-        Runs the model `batch_size` times with the same template (different names)
-        and captures the output of all the heads in all the blocks.
-
-        Returns: the mean of the frozen output. List of blocks of heads of tensors.
-
-        Example:
-        ```
-        [
-            [head_output_1, head_output_2, ...],
-            [head_output_1, head_output_2, ...],
-        ]
-        ```
-        """
-
+    def capture_baseline_output(self, prompts_abc: list[str]) -> CapturedOutput:
+        B = len(prompts_abc)
         self.model.set_capture_output(True)
         self.model.set_use_frozen_output(False)
-        cases = [self.prompt_template.sample_abc() for _ in range(batch_size)]
-        indices = self.tokenizer.encode_batch(cases)
 
-        B = batch_size
-        S = len(indices[0])
+        logits_abc = self.forward(prompts_abc)
+        assert_shape("logits_abc", logits_abc, (B, self.V))
 
-        # shape: [V]
-        probs = self.forward(indices)
-        assert_shape("probs", probs, (B, self.V))
+        mean_logits_abc = logits_abc.mean(dim=0, keepdim=True)
+        assert_shape("mean_logits_abc", mean_logits_abc, (1, self.V))
 
-        mean_probs = probs.mean(dim=0, keepdim=True)
-        assert_shape("mean_probs", mean_probs, (1, self.V))
-
-        results: list[list[torch.Tensor]] = []
+        results = []
         for block_idx in range(self.model.config.num_blocks):
-            block_results: list[torch.Tensor] = []
+            block_results = []
             for head_idx in range(self.model.config.num_heads):
-                output = (
+                head_output = (
                     self.model.blocks[block_idx].attention.heads[head_idx].frozen_output
                 )
-                assert_shape("output", output, (B, S, self.H))
+                S = head_output.shape[1]
+                assert_shape("head_output", head_output, (B, S, self.H))
 
-                # shape: [B, S, H] -> [1, S, H]
-                mean_output = output.mean(dim=0, keepdim=True)
+                mean_output = head_output.mean(dim=0, keepdim=True)
                 assert_shape("mean_output", mean_output, (1, S, self.H))
 
                 block_results.append(mean_output)
-
             results.append(block_results)
 
-        self.model.set_capture_output(False)
-        self.baseline_output = CapturedOutput(
+        return CapturedOutput(
             head_outputs=results,
-            probs=mean_probs,
+            logits=mean_logits_abc,
         )
 
-    def analyze_head(
-        self, block_idx: int, head_idx: int, s1: str, s2: str, s3: str
-    ) -> HeadAnalysisResult:
-        if self.baseline_output is None:
-            raise ValueError("Must call `capture_baseline_output` first")
+    def path_patching(
+        self,
+        config: PathPatchingConfig,
+        baseline_output: CapturedOutput,
+        prompts_abb: list[str],
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        # ================================
+        # Phase A: capture the ABC output over all prompts in prompts_abc
+        # ================================
+        # We're only interested in the output of the start head
+        baseline = baseline_output.head_outputs[config.start_head.block_idx][
+            config.start_head.head_idx
+        ]
+        B = len(prompts_abb)
+        S = baseline.shape[1]
+        assert_shape("baseline", baseline, (1, S, self.H))
 
-        # Phase B: capture the output before path patching
+        # ================================
+        # Phase B: capture the ABB output
+        # ================================
+        B = len(prompts_abb)
         self.model.set_capture_output(True)
         self.model.set_use_frozen_output(False)
-        indices = [self.tokenizer.encode(self.prompt_template.from_abc(s1, s2, s3))]
+        logits_prepatched = self.forward(prompts_abb)
+        assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
 
-        S = len(indices[0])
+        # ================================
+        # Phase C: patch the start_head using the ABC start_head output
+        # ================================
+        # Effectively, we're knocking out the start_head output
+        # If the head is not important, the patched output should be close to the ABB output
+        # NOTE: the patched output is not used within this phase (it is used in Phase D)
+        baseline = baseline.expand(B, S, self.H)
+        assert_shape("baseline", baseline, (B, S, self.H))
 
-        original_probs = self.forward(indices)
-        assert_shape("original_probs", original_probs, (1, self.V))
+        self.model.blocks[config.start_head.block_idx].attention.heads[
+            config.start_head.head_idx
+        ].frozen_output = baseline
 
-        # Phase C: path patching head[block_idx][head_idx] using the baseline output
+        # Run the model using the frozen outputs
+        # But also capture all end_heads outputs
+        # NOTE: the captured end_heads outputs are not used within this phase (they are used in Phase D)
         self.model.set_capture_output(False)
+        for end_head in config.end_heads:
+            self.model.blocks[end_head.block_idx].attention.heads[
+                end_head.head_idx
+            ].should_capture_output = True
         self.model.set_use_frozen_output(True)
-        captured_output = self.baseline_output.head_outputs[block_idx][head_idx]
-        assert_shape("captured_output", captured_output, (1, S, self.H))
+        logits_patched = self.forward(prompts_abb)
+        assert_shape("logits_patched", logits_patched, (B, self.V))
 
-        self.model.blocks[block_idx].attention.heads[
-            head_idx
-        ].frozen_output = captured_output
+        # ================================
+        # Phase D: Forward with the end_heads frozen output
+        # ================================
+        if config.end_heads:
+            self.model.set_capture_output(False)
+            self.model.set_use_frozen_output(True)
+            logits_patched = self.forward(prompts_abb)
+            assert_shape("patched_probs", logits_patched, (B, self.V))
 
-        patched_probs = self.forward(indices)
-        assert_shape("patched_probs", patched_probs, (1, self.V))
-
-        # Analysis is done, reset `use_frozen_output` to False
+        self.model.set_capture_output(False)
         self.model.set_use_frozen_output(False)
 
-        # Flatten for metric computation
-        original_probs = original_probs.squeeze(0)
-        patched_probs = patched_probs.squeeze(0)
+        return logits_prepatched, logits_patched
 
-        s1_idx = indices[0][0]
-        s2_idx = indices[0][1]
-        ioi_metrics = IoiMetrics.from_probs(
-            original_probs, patched_probs, s1_idx, s2_idx
+    def analyze_head_v2(
+        self,
+        captured_output: CapturedOutput,
+        block_idx: int,
+        head_idx: int,
+        s1: str,
+        s2: str,
+    ) -> HeadAnalysisResult:
+        s1_indices = torch.tensor([self.tokenizer.encode(f" {s1.strip()}")[0]])
+        s2_indices = torch.tensor([self.tokenizer.encode(f" {s2.strip()}")[0]])
+        assert_shape("s1_indices", s1_indices, (1,))
+        assert_shape("s2_indices", s2_indices, (1,))
+
+        prompt = self.prompt_template.from_abb(s1, s2)
+
+        logits_prepatched, logits_patched = self.path_patching(
+            PathPatchingConfig(
+                batch_size=1,
+                start_head=HeadId(block_idx, head_idx),
+                end_heads=[],
+            ),
+            captured_output,
+            [prompt],
         )
+
+        original_probs = torch.softmax(logits_prepatched, dim=-1).squeeze(0)
+        patched_probs = torch.softmax(logits_patched, dim=-1).squeeze(0)
+        assert_shape("original_probs", original_probs, (self.V,))
+        assert_shape("patched_probs", patched_probs, (self.V,))
 
         return HeadAnalysisResult(
             original_probs=original_probs,
             patched_probs=patched_probs,
-            metrics=ioi_metrics,
+            s1_indices=s1_indices,
+            s2_indices=s2_indices,
+        )
+
+    def analyze_head(
+        self, config: PathPatchingConfig, baseline_output: CapturedOutput
+    ) -> DiffLogitsMetrics:
+        B = config.batch_size
+
+        names = self.prompt_template.name_sampler.sample_batch(2, config.batch_size)
+        prompts_abb = [self.prompt_template.from_abb(s1, s2) for s1, s2 in names]
+
+        s1_indices = torch.tensor(
+            [self.tokenizer.encode(f" {s1.strip()}")[0] for s1, _ in names]
+        )
+        assert_shape("s1_indices", s1_indices, (B,))
+
+        s2_indices = torch.tensor(
+            [self.tokenizer.encode(f" {s2.strip()}")[0] for _, s2 in names]
+        )
+        assert_shape("s2_indices", s2_indices, (B,))
+
+        logits_prepatched, logits_patched = self.path_patching(
+            config,
+            baseline_output,
+            prompts_abb,
+        )
+        assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
+        assert_shape("logits_patched", logits_patched, (B, self.V))
+
+        s1_logits_prepatched = logits_prepatched[:, s1_indices]
+        assert_shape("s1_logits_prepatched", s1_logits_prepatched, (B, 1))
+        s2_logits_prepatched = logits_prepatched[:, s2_indices]
+        assert_shape("s2_logits_prepatched", s2_logits_prepatched, (B, 1))
+
+        s1_logits_patched = logits_patched[:, s1_indices]
+        assert_shape("s1_logits_patched", s1_logits_patched, (B, 1))
+        s2_logits_patched = logits_patched[:, s2_indices]
+        assert_shape("s2_logits_patched", s2_logits_patched, (B, 1))
+
+        s1_logit_diff = (
+            s1_logits_patched.mean(dim=0) - s1_logits_prepatched.mean(dim=0)
+        ).item()
+        s2_logit_diff = (
+            s2_logits_patched.mean(dim=0) - s2_logits_prepatched.mean(dim=0)
+        ).item()
+
+        probs_prepatched = torch.softmax(logits_prepatched, dim=-1)
+        assert_shape("probs_prepatched", probs_prepatched, (B, self.V))
+        probs_patched = torch.softmax(logits_patched, dim=-1)
+        assert_shape("probs_patched", probs_patched, (B, self.V))
+
+        s1_prob_diff = (
+            probs_patched[:, s1_indices].mean(dim=0)
+            - probs_prepatched[:, s1_indices].mean(dim=0)
+        ).item()
+        s2_prob_diff = (
+            probs_patched[:, s2_indices].mean(dim=0)
+            - probs_prepatched[:, s2_indices].mean(dim=0)
+        ).item()
+
+        return DiffLogitsMetrics(
+            s1_logit=s1_logit_diff,
+            s2_logit=s2_logit_diff,
+            s1_prob=s1_prob_diff,
+            s2_prob=s2_prob_diff,
+        )
+
+    def analyze_head_pairwise(self, config: PathPatchingConfig) -> DiffLogitsMetrics:
+        s1_logits: list[float] = []
+        s2_logits: list[float] = []
+        s1_probs: list[float] = []
+        s2_probs: list[float] = []
+
+        for s1, s2, s3 in self.prompt_template.name_sampler.sample_batch(
+            3, config.batch_size
+        ):
+            s1 = "Mary"
+            s2 = "John"
+            s3 = "Jerry"
+
+            s1_idx = self.tokenizer.encode(f" {s1.strip()}")[0]
+            s2_idx = self.tokenizer.encode(f" {s2.strip()}")[0]
+
+            prompt_abc = self.prompt_template.from_abc(s1, s2, s3)
+            prompt_aba = self.prompt_template.from_aba(s1, s2)
+
+            print(f"{prompt_abc=}")
+            baseline_output = self.capture_baseline_output([prompt_abc])
+            baseline_probs = torch.softmax(baseline_output.logits, dim=-1)
+            top_probs, top_indices = torch.topk(baseline_probs.squeeze(0), k=3)
+            assert_shape("top_probs", top_probs, (3,))
+            assert_shape("top_indices", top_indices, (3,))
+            for i in range(3):
+                indices = [int(top_indices[i])]
+                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
+
+            logits_prepatched, logits_patched = self.path_patching(
+                config,
+                baseline_output,
+                [prompt_aba],
+            )
+            assert_shape("logits_prepatched", logits_prepatched, (1, self.V))
+            assert_shape("logits_patched", logits_patched, (1, self.V))
+
+            print(f"{prompt_aba=}")
+            probs_prepatched = torch.softmax(logits_prepatched, dim=-1)
+            assert_shape("probs_prepatched", probs_prepatched, (1, self.V))
+            top_probs, top_indices = torch.topk(probs_prepatched.squeeze(0), k=3)
+            assert_shape("top_probs", top_probs, (3,))
+            assert_shape("top_indices", top_indices, (3,))
+            for i in range(3):
+                indices = [int(top_indices[i])]
+                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
+
+            print(f"{prompt_aba=}")
+            probs_patched = torch.softmax(logits_patched, dim=-1)
+            assert_shape("probs_patched", probs_patched, (1, self.V))
+            top_probs, top_indices = torch.topk(probs_patched.squeeze(0), k=3)
+            assert_shape("top_probs", top_probs, (3,))
+            assert_shape("top_indices", top_indices, (3,))
+            for i in range(3):
+                indices = [int(top_indices[i])]
+                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
+
+            logits_diff = logits_patched - logits_prepatched
+            assert_shape("logits_diff", logits_diff, (1, self.V))
+
+            probs_diff = probs_patched - probs_prepatched
+            assert_shape("probs_diff", probs_diff, (1, self.V))
+
+            s1_logit_diff = logits_diff[0, s1_idx].item()
+            s2_logit_diff = logits_diff[0, s2_idx].item()
+            s1_prob_diff = probs_diff[0, s1_idx].item()
+            s2_prob_diff = probs_diff[0, s2_idx].item()
+
+            s1_logits.append(s1_logit_diff)
+            s2_logits.append(s2_logit_diff)
+            s1_probs.append(s1_prob_diff)
+            s2_probs.append(s2_prob_diff)
+
+        mean_s1_logits = torch.tensor(s1_logits, device=self.device).mean().item()
+        mean_s2_logits = torch.tensor(s2_logits, device=self.device).mean().item()
+        mean_s1_probs = torch.tensor(s1_probs, device=self.device).mean().item()
+        mean_s2_probs = torch.tensor(s2_probs, device=self.device).mean().item()
+
+        return DiffLogitsMetrics(
+            s1_logit=mean_s1_logits,
+            s2_logit=mean_s2_logits,
+            s1_prob=mean_s1_probs,
+            s2_prob=mean_s2_probs,
         )

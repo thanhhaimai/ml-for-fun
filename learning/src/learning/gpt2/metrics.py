@@ -400,12 +400,30 @@ def _bhattacharyya_coefficient(p: torch.Tensor, q: torch.Tensor) -> float:
 
 
 @dataclass
-class IoiMetrics:
+class DiffLogitsMetrics:
+    s1_logit: float
+    s2_logit: float
+    s1_prob: float
+    s2_prob: float
+
+    def summary(self) -> dict[str, float]:
+        return {
+            "s1_logit": self.s1_logit,
+            "s2_logit": self.s2_logit,
+            "s1_prob": self.s1_prob,
+            "s2_prob": self.s2_prob,
+        }
+
+    @classmethod
+    def merge_df(cls, metrics: list[Self]) -> pd.DataFrame:
+        return pd.DataFrame([m.summary() for m in metrics])
+
+
+@dataclass
+class ProbsMetrics:
     # Inputs
     original_logits: torch.Tensor
     patched_logits: torch.Tensor
-    s1_idx: int
-    s2_idx: int
 
     # Metrics
     kl_divergence: float
@@ -415,29 +433,12 @@ class IoiMetrics:
     cosine_similarity: float
     hellinger_distance: float
     bhattacharyya_coefficient: float
-    s1_prob_change: float
-    s2_prob_change: float
-    logit_diff_change: float
-
-    @classmethod
-    def from_probs(
-        cls,
-        original_probs: torch.Tensor,
-        patched_probs: torch.Tensor,
-        s1_idx: int,
-        s2_idx: int,
-    ) -> Self:
-        original_logits = torch.log(original_probs)
-        patched_logits = torch.log(patched_probs)
-        return cls.from_logits(original_logits, patched_logits, s1_idx, s2_idx)
 
     @classmethod
     def from_logits(
         cls,
         original_logits: torch.Tensor,
         patched_logits: torch.Tensor,
-        s1_idx: int,
-        s2_idx: int,
     ) -> Self:
         original_probs = torch.softmax(original_logits, dim=-1)
         patched_probs = torch.softmax(patched_logits, dim=-1)
@@ -451,17 +452,10 @@ class IoiMetrics:
         bhattacharyya_coefficient = _bhattacharyya_coefficient(
             original_probs, patched_probs
         )
-        s1_prob_change = (original_probs[s1_idx] - patched_probs[s1_idx]).item()
-        s2_prob_change = (original_probs[s2_idx] - patched_probs[s2_idx]).item()
-        original_logit_diff = original_logits[s1_idx] - original_logits[s2_idx]
-        patched_logit_diff = patched_logits[s1_idx] - patched_logits[s2_idx]
-        logit_diff_change = (original_logit_diff - patched_logit_diff).item()
 
         return cls(
             original_logits=original_logits,
             patched_logits=patched_logits,
-            s1_idx=s1_idx,
-            s2_idx=s2_idx,
             kl_divergence=kl_divergence,
             js_divergence=js_divergence,
             total_variation=total_variation,
@@ -469,30 +463,19 @@ class IoiMetrics:
             cosine_similarity=cosine_similarity,
             hellinger_distance=hellinger_distance,
             bhattacharyya_coefficient=bhattacharyya_coefficient,
-            s1_prob_change=s1_prob_change,
-            s2_prob_change=s2_prob_change,
-            logit_diff_change=logit_diff_change,
         )
 
+    def summary(self) -> dict[str, float]:
+        return {
+            "KL": self.kl_divergence,
+            "JS": self.js_divergence,
+            "TV": self.total_variation,
+            "L2": self.l2_distance,
+            "Cosine": self.cosine_similarity,
+            "Hellinger": self.hellinger_distance,
+            "Bhattacharyya": self.bhattacharyya_coefficient,
+        }
 
-def merge_metrics(metrics: list[IoiMetrics]) -> pd.DataFrame:
-    """
-    Convert a list of IoiMetrics to a pandas DataFrame.
-    """
-    return pd.DataFrame(
-        [
-            {
-                "KL": m.kl_divergence,
-                "JS": m.js_divergence,
-                "TV": m.total_variation,
-                "L2": m.l2_distance,
-                "Cosine": m.cosine_similarity,
-                "Hellinger": m.hellinger_distance,
-                "Bhattacharyya": m.bhattacharyya_coefficient,
-                "S1 Probs": m.s1_prob_change,
-                "S2 Probs": m.s2_prob_change,
-                "Logit Diff": m.logit_diff_change,
-            }
-            for m in metrics
-        ]
-    )
+    @classmethod
+    def merge_df(cls, metrics: list[Self]) -> pd.DataFrame:
+        return pd.DataFrame([m.summary() for m in metrics])
