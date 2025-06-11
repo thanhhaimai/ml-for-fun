@@ -70,6 +70,12 @@ PRETRAINED_CONFIG = {
 }
 
 
+@dataclass
+class HeadId:
+    block_idx: int
+    head_idx: int
+
+
 class AttentionHead(nn.Module):
     def __init__(self, config: ModelConfig):
         super().__init__()
@@ -480,15 +486,35 @@ class GPT2(nn.Module):
 
         return indices
 
-    def set_capture_output(self, should_capture_output: bool):
+    def set_capture_output_all(self, should_capture_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
                 head.should_capture_output = should_capture_output
 
-    def set_use_frozen_output(self, use_frozen_output: bool):
+    def set_capture_output_heads(
+        self, head_ids: list[HeadId], should_capture_output: bool
+    ):
+        for head_id in head_ids:
+            self.blocks[head_id.block_idx].attention.heads[
+                head_id.head_idx
+            ].should_capture_output = should_capture_output
+
+    def set_use_frozen_output_all(self, use_frozen_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
                 head.use_frozen_output = use_frozen_output
+
+    def set_use_frozen_output_block(self, block_idx: int, use_frozen_output: bool):
+        for head in self.blocks[block_idx].attention.heads:
+            head.use_frozen_output = use_frozen_output
+
+    def set_use_frozen_output_heads(
+        self, head_ids: list[HeadId], use_frozen_output: bool
+    ):
+        for head_id in head_ids:
+            self.blocks[head_id.block_idx].attention.heads[
+                head_id.head_idx
+            ].use_frozen_output = use_frozen_output
 
     @classmethod
     def from_pretrained(

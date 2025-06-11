@@ -1,11 +1,10 @@
 from dataclasses import dataclass
-from typing import NamedTuple
 
 import tiktoken
 import torch
 
 from learning.gpt2.metrics import ProbsMetrics
-from learning.gpt2.model import GPT2
+from learning.gpt2.model import GPT2, HeadId
 from learning.gpt2.prompts import NameSample, PromptBatch, PromptTemplate
 
 
@@ -32,11 +31,6 @@ class CapturedOutput:
     # Mean of the final logits
     # shape: [B, V]
     logits: torch.Tensor
-
-
-class HeadId(NamedTuple):
-    block_idx: int
-    head_idx: int
 
 
 @dataclass
@@ -100,8 +94,8 @@ class IoiCircuitAnalyzer:
 
     def capture_baseline_output(self, prompts_abc: list[str]) -> CapturedOutput:
         B = len(prompts_abc)
-        self.model.set_capture_output(True)
-        self.model.set_use_frozen_output(False)
+        self.model.set_capture_output_all(True)
+        self.model.set_use_frozen_output_all(False)
 
         logits_abc = self.forward(prompts_abc)
         assert_shape("logits_abc", logits_abc, (B, self.V))
@@ -142,11 +136,10 @@ class IoiCircuitAnalyzer:
         assert_shape("baseline", baseline, (B, S, self.H))
 
         # ================================
-        # Phase B: capture the ABB output
+        # Phase B: capture the ABB output (prepatched)
         # ================================
-        B = len(prompts_abb)
-        self.model.set_capture_output(True)
-        self.model.set_use_frozen_output(False)
+        self.model.set_capture_output_all(True)
+        self.model.set_use_frozen_output_all(False)
         logits_prepatched = self.forward(prompts_abb)
         assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
 
@@ -155,7 +148,7 @@ class IoiCircuitAnalyzer:
         # ================================
         # Effectively, we're knocking out the start_head output
         # If the head is not important, the patched output should be close to the ABB output
-        # NOTE: the patched output is not used within this phase (it is used in Phase D)
+        # NOTE: the patched end_heads output is not used within this phase (it is used in Phase D)
         self.model.blocks[config.start_head.block_idx].attention.heads[
             config.start_head.head_idx
         ].frozen_output = baseline
@@ -163,12 +156,9 @@ class IoiCircuitAnalyzer:
         # Run the model using the frozen outputs
         # But also capture all end_heads outputs
         # NOTE: the captured end_heads outputs are not used within this phase (they are used in Phase D)
-        self.model.set_capture_output(False)
-        for end_head in config.end_heads:
-            self.model.blocks[end_head.block_idx].attention.heads[
-                end_head.head_idx
-            ].should_capture_output = True
-        self.model.set_use_frozen_output(True)
+        self.model.set_capture_output_all(False)
+        self.model.set_capture_output_heads(config.end_heads, True)
+        self.model.set_use_frozen_output_all(True)
         logits_patched = self.forward(prompts_abb)
         assert_shape("logits_patched", logits_patched, (B, self.V))
 
@@ -176,13 +166,25 @@ class IoiCircuitAnalyzer:
         # Phase D: Forward with the end_heads frozen output
         # ================================
         if config.end_heads:
-            self.model.set_capture_output(False)
-            self.model.set_use_frozen_output(True)
+            self.model.set_capture_output_all(False)
+
+            # any block after this layer will not use the frozen output except for the end_heads
+            min_block_idx = min(head.block_idx for head in config.end_heads)
+
+            # - First, mark all heads to use frozen output
+            self.model.set_use_frozen_output_all(True)
+
+            # - Second, mark all blocks after the min_block_idx to not use frozen output
+            #   This means the network is split into two parts: the first part uses the frozen output, the second part does not
+            for block_idx in range(min_block_idx + 1, self.model.config.num_blocks):
+                self.model.set_use_frozen_output_block(block_idx, False)
+
+            # - Third, mark the end_heads to use the frozen output
+            #   The end_heads are the only heads in the second part that use the frozen output
+            self.model.set_use_frozen_output_heads(config.end_heads, True)
+
             logits_patched = self.forward(prompts_abb)
             assert_shape("patched_probs", logits_patched, (B, self.V))
-
-        self.model.set_capture_output(False)
-        self.model.set_use_frozen_output(False)
 
         return logits_prepatched, logits_patched
 
