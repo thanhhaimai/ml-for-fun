@@ -15,6 +15,8 @@ def _kl_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float
     Kullback-Leibler divergence: KL(p || q) = Σ p(x) * log(p(x) / q(x))
 
     Measures how much information is lost when using q to approximate p.
+    Prefer this over JS divergence when directionality matters.
+
     In our context:
     - p = original probability distribution (before head patching)
     - q = patched probability distribution (after head patching)
@@ -25,24 +27,17 @@ def _kl_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float
     - KL ≈ 0.1: Moderate effect (noticeable probability changes)
     - KL ≈ 1.0: Large effect (major probability redistribution)
     - KL > 2.0: Very large effect (dramatic change in model behavior)
-
-    Why KL divergence for mechanistic interpretability:
-    1. Measures distributional similarity (not just point estimates)
-    2. Sensitive to changes in high-probability tokens
-    3. Theoretically grounded (information theory)
-    4. Widely used standard in the field
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-        eps: Small constant to avoid log(0)
-
-    Returns:
-        KL divergence value (higher = more impact from this head)
     """
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
+
     p_safe = torch.clamp(p, min=eps)
     q_safe = torch.clamp(q, min=eps)
-    return torch.sum(p_safe * torch.log(p_safe / q_safe)).item()
+    kl = torch.sum(p_safe * torch.log(p_safe / q_safe), dim=-1)
+    assert_shape("kl", kl, (B,))
+
+    return kl.mean().item()
 
 
 def _js_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float:
@@ -51,6 +46,8 @@ def _js_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float
     where M = 0.5 * (p + q) is the average distribution.
 
     A symmetric, bounded version of KL divergence that measures distributional similarity.
+    Prefer this over KL divergence when directionality does not matter.
+
     In our context:
     - p = original probability distribution (before head patching)
     - q = patched probability distribution (after head patching)
@@ -62,38 +59,22 @@ def _js_divergence(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float
     - JS ≈ 0.1: Large distributional change
     - JS ≈ 0.3: Very large distributional change
     - JS approaches log(2) ≈ 0.693: Maximum possible divergence
-
-    Advantages over KL divergence:
-    1. Symmetric: JS(p||q) = JS(q||p)
-    2. Bounded: Always between 0 and log(2)
-    3. More stable: No infinite values
-    4. √JS is a true distance metric
-
-    When to prefer JS over KL:
-    - When you want symmetric comparison
-    - When dealing with sparse distributions (less prone to infinity)
-    - When you need bounded, interpretable values
-    - For clustering or when metric properties matter
-
-    When to prefer KL over JS:
-    - Standard in mechanistic interpretability literature
-    - More sensitive to distributional changes
-    - When directionality matters (P→Q vs Q→P)
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-        eps: Small constant to avoid log(0)
-
-    Returns:
-        JS divergence value in [0, log(2)], higher = more impact from this head
     """
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
+
     p_safe = torch.clamp(p, min=eps)
     q_safe = torch.clamp(q, min=eps)
     m = 0.5 * (p_safe + q_safe)
-    kl_pm = torch.sum(p_safe * torch.log(p_safe / m))
-    kl_qm = torch.sum(q_safe * torch.log(q_safe / m))
-    return (0.5 * (kl_pm + kl_qm)).item()
+    assert_shape("m", m, (B, V))
+
+    kl_pm = torch.sum(p_safe * torch.log(p_safe / m), dim=-1)
+    kl_qm = torch.sum(q_safe * torch.log(q_safe / m), dim=-1)
+    assert_shape("kl_pm", kl_pm, (B,))
+    assert_shape("kl_qm", kl_qm, (B,))
+
+    return (0.5 * (kl_pm + kl_qm)).mean().item()
 
 
 def _total_variation_distance(p: torch.Tensor, q: torch.Tensor) -> float:
@@ -101,8 +82,7 @@ def _total_variation_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     Total Variation distance: TV(p, q) = 0.5 * Σ |p(x) - q(x)|
 
     Measures the minimum amount of probability mass that must be moved to
-    transform distribution p into distribution q. Has the most intuitive
-    geometric interpretation of all distributional distances.
+    transform distribution p into distribution q.
 
     In our context:
     - p = original probability distribution (before head patching)
@@ -114,73 +94,15 @@ def _total_variation_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     - TV = 0.2: Need to move 20% of probability mass
     - TV = 0.5: Need to move 50% of probability mass (large change)
     - TV = 1.0: Distributions have no overlap (maximum possible change)
-
-    Intuitive meaning:
-    If you imagine probability as "sand" distributed across vocabulary tokens,
-    TV tells you what fraction of the sand you need to shovel from one pile
-    to another to transform the original distribution into the patched one.
-
-    Why TV (0.5 × L1) instead of raw L1 distance:
-    1. Bounded [0,1] vs L1's [0,2] for probability distributions
-    2. TV = 1 means "completely different" (intuitive)
-    3. Standard mathematical definition in probability theory
-    4. Cleaner probabilistic interpretation
-
-    Advantages:
-    1. Most intuitive interpretation (percentage of probability moved)
-    2. Bounded [0,1] with clear meaning
-    3. Symmetric: TV(p,q) = TV(q,p)
-    4. True metric (satisfies triangle inequality)
-    5. Less sensitive to changes in low-probability tokens
-
-    Compared to other metrics:
-    - vs KL: More intuitive, less sensitive, bounded
-    - vs JS: Simpler formula, equally bounded and symmetric
-    - vs L2: Better suited for probability distributions
-    - vs L1: Same ranking, but TV has better [0,1] bounds
-
-    When to prefer TV:
-    - Want intuitive "percentage moved" interpretation
-    - Presenting results to non-technical audiences
-    - Care more about where probability mass goes than information theory
-    - Working with very sparse distributions
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-
-    Returns:
-        Total variation distance in [0,1], higher = more probability mass moved
     """
-    return (0.5 * torch.sum(torch.abs(p - q))).item()
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
 
+    tv = 0.5 * torch.sum(torch.abs(p - q), dim=-1)
+    assert_shape("tv", tv, (B,))
 
-def _l1_distance(p: torch.Tensor, q: torch.Tensor) -> float:
-    """
-    L1 (Manhattan) distance: L1(p, q) = Σ |p(x) - q(x)|
-
-    Raw sum of absolute differences between probability distributions.
-    Note: Total Variation = 0.5 × L1, so rankings will be identical.
-
-    Interpretation for probability distributions:
-    - L1 = 0: Distributions identical
-    - L1 = 0.2: Sum of absolute differences is 0.2
-    - L1 = 1.0: Moderate change
-    - L1 = 2.0: Maximum possible change (no overlap)
-
-    Why Total Variation is usually preferred over raw L1:
-    - TV bounded [0,1] vs L1 bounded [0,2]
-    - TV = 1 means "completely different" (intuitive)
-    - TV is the standard definition in probability theory
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-
-    Returns:
-        L1 distance in [0,2], higher = more different (same ranking as TV)
-    """
-    return torch.sum(torch.abs(p - q)).item()
+    return tv.mean().item()
 
 
 def _l2_distance(p: torch.Tensor, q: torch.Tensor) -> float:
@@ -188,7 +110,7 @@ def _l2_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     L2 (Euclidean) distance: L2(p, q) = √(Σ (p(x) - q(x))²)
 
     The "straight line" distance between two probability distributions when
-    viewed as points in high-dimensional space. Most familiar distance metric.
+    viewed as points in high-dimensional space.
 
     In our context:
     - p = original probability distribution (before head patching)
@@ -201,56 +123,14 @@ def _l2_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     - L2 ≈ 0.7: Large distributional change
     - L2 ≈ 1.4: Very large distributional change
     - L2 = √2 ≈ 1.414: Maximum possible distance (no overlap)
-
-    Key characteristics:
-    1. Squared differences emphasize large changes over small ones
-    2. Less sensitive to many small changes than L1/TV
-    3. More sensitive to few large changes than L1/TV
-    4. Familiar geometric interpretation
-
-    Example sensitivity comparison:
-    - Many small changes: L1/TV > L2 (L1/TV more sensitive)
-    - Few large changes: L2 > L1/TV (L2 more sensitive)
-
-    Advantages:
-    1. Most familiar distance metric (Euclidean)
-    2. Differentiable everywhere (useful for optimization)
-    3. Less sensitive to outliers than higher norms
-    4. Natural geometric interpretation
-    5. Symmetric and satisfies triangle inequality
-
-    Disadvantages:
-    1. Less intuitive interpretation than TV for probability distributions
-    2. Can be dominated by a few large changes
-    3. Not as standard in probability/information theory as KL/JS
-    4. Bounded [0,√2] is less intuitive than TV's [0,1]
-
-    Compared to other metrics:
-    - vs KL: Less sensitive, no information-theoretic meaning, bounded
-    - vs JS: Similar boundedness, but less probability-theoretic
-    - vs TV/L1: Emphasizes large changes more, less intuitive for probabilities
-    - vs higher Lp norms: More robust, less dominated by outliers
-
-    When to prefer L2:
-    - When you care more about large probability changes than many small ones
-    - Familiar with Euclidean distance concepts
-    - Need differentiability (for gradient-based methods)
-    - Want to downweight the impact of many tiny changes
-
-    When to avoid L2:
-    - Want to count all probability movement equally (use TV)
-    - Need information-theoretic interpretation (use KL/JS)
-    - Working with very sparse distributions
-    - Want most intuitive probability interpretation
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-
-    Returns:
-        L2 distance in [0, √2], higher = more different (emphasizes large changes)
     """
-    return torch.norm(p - q, p=2).item()
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
+
+    l2 = torch.norm(p - q, p=2, dim=-1)
+    assert_shape("l2", l2, (B,))
+    return l2.mean().item()
 
 
 def _cosine_similarity(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> float:
@@ -274,68 +154,31 @@ def _cosine_similarity(p: torch.Tensor, q: torch.Tensor, eps: float = 1e-8) -> f
     Key insight - cosine similarity vs distance metrics:
     Distance metrics ask: "How much probability moved?"
     Cosine similarity asks: "Did the relative importance pattern change?"
-
-    Example where they differ:
-    P = [0.8, 0.15, 0.05]  # Strong preference for token 1
-    Q = [0.4, 0.075, 0.025] # Same relative pattern, half the "confidence"
-
-    - High cosine similarity (≈1.0): Same relative preferences
-    - High distance metrics: Lots of probability moved
-
-    This reveals different types of head behavior:
-    - High cos_sim + high distance = Head changes confidence but preserves preferences
-    - Low cos_sim + high distance = Head fundamentally changes token preferences
-    - Low cos_sim + low distance = Head makes subtle but important pattern shifts
-
-    When cosine similarity is most useful:
-    1. Understanding if heads preserve relative token importance
-    2. Detecting "confidence adjustment" vs "preference changing" heads
-    3. Finding heads that maintain distributional shape
-    4. Comparing distribution patterns regardless of magnitude
-
-    Advantages:
-    1. Scale-invariant (focuses on shape, not magnitude)
-    2. Intuitive geometric interpretation (angle between vectors)
-    3. Reveals different information than distance metrics
-    4. Good for understanding relative importance preservation
-
-    Disadvantages:
-    1. Less sensitive to magnitude changes (which may be important)
-    2. Can be misleading if you care about absolute probability values
-    3. Less standard in mechanistic interpretability literature
-    4. Harder to interpret for sparse distributions
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-        eps: Small constant for numerical stability
-
-    Returns:
-        Cosine similarity in [0,1], higher = more similar relative patterns
     """
-    # Add small epsilon for numerical stability
-    p_safe = p + eps
-    q_safe = q + eps
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
 
-    dot_product = torch.sum(p_safe * q_safe)
-    norm_p = torch.norm(p_safe, p=2)
-    norm_q = torch.norm(q_safe, p=2)
+    dot_product = torch.sum(p * q, dim=-1)
+    norm_p = torch.norm(p, p=2, dim=-1)
+    norm_q = torch.norm(q, p=2, dim=-1)
+    assert_shape("dot_product", dot_product, (B,))
+    assert_shape("norm_p", norm_p, (B,))
+    assert_shape("norm_q", norm_q, (B,))
 
-    return (dot_product / (norm_p * norm_q)).item()
+    return (dot_product / (norm_p * norm_q)).mean().item()
 
 
 def _hellinger_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     """
     Hellinger distance: H(P,Q) = (1/√2) × √Σ(√P(x) - √Q(x))²
 
-    A metric specifically designed for probability distributions, based on
-    the Hellinger coefficient. Popular in statistics and probability theory.
+    A metric based on the Hellinger coefficient. Less sensitive to differences
+    in small probabilities and more sensitive to differences in large probabilities.
 
-    Properties:
-    - Bounded [0,1]
-    - Symmetric
-    - More robust to outliers than L2
-    - Less sensitive to differences in small probabilities
+    In our context:
+    - p = original probability distribution (before head patching)
+    - q = patched probability distribution (after head patching)
 
     Interpretation:
     - H = 0: Identical distributions
@@ -343,60 +186,22 @@ def _hellinger_distance(p: torch.Tensor, q: torch.Tensor) -> float:
     - H ≈ 0.3: Moderate difference
     - H ≈ 0.7: Large difference
     - H = 1: Completely disjoint distributions
-
-    When to use:
-    - Want a probability-specific metric
-    - More robust alternative to L2
-    - Working with sparse distributions
-    - Need bounded [0,1] metric that's probability-theoretic
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-
-    Returns:
-        Hellinger distance in [0,1], higher = more different
     """
+    B, V = p.shape
+    assert_shape("p", p, (B, V))
+    assert_shape("q", q, (B, V))
+
     sqrt_p = torch.sqrt(p)
     sqrt_q = torch.sqrt(q)
-    return (
-        (1 / torch.sqrt(torch.tensor(2.0))) * torch.norm(sqrt_p - sqrt_q, p=2)
-    ).item()
+    assert_shape("sqrt_p", sqrt_p, (B, V))
+    assert_shape("sqrt_q", sqrt_q, (B, V))
 
+    hellinger = (1 / torch.sqrt(torch.tensor(2.0))) * torch.norm(
+        sqrt_p - sqrt_q, p=2, dim=-1
+    )
+    assert_shape("hellinger", hellinger, (B,))
 
-def _bhattacharyya_coefficient(p: torch.Tensor, q: torch.Tensor) -> float:
-    """
-    Bhattacharyya coefficient: BC(P,Q) = Σ √(P(x) × Q(x))
-
-    Measures the amount of overlap between two probability distributions.
-    Related to Hellinger distance: H² = 1 - BC
-
-    Properties:
-    - Range [0,1]
-    - 1 = identical distributions
-    - 0 = no overlap
-    - Geometric mean of probabilities
-
-    Interpretation:
-    - BC = 1.0: Perfect overlap (identical)
-    - BC ≈ 0.9: High overlap
-    - BC ≈ 0.7: Moderate overlap
-    - BC ≈ 0.3: Low overlap
-    - BC = 0.0: No overlap (disjoint)
-
-    When to use:
-    - Want to measure distributional "overlap"
-    - Interested in shared probability mass
-    - Complementary to distance metrics
-
-    Args:
-        p: Original probability distribution [vocab_size]
-        q: Patched probability distribution [vocab_size]
-
-    Returns:
-        Bhattacharyya coefficient in [0,1], higher = more overlap
-    """
-    return torch.sum(torch.sqrt(p * q)).item()
+    return hellinger.mean().item()
 
 
 @dataclass
@@ -440,7 +245,6 @@ class ProbsMetrics:
     l2_distance: float
     cosine_similarity: float
     hellinger_distance: float
-    bhattacharyya_coefficient: float
 
     @classmethod
     def from_logits(
@@ -490,9 +294,6 @@ class ProbsMetrics:
         l2_distance = _l2_distance(original_probs, patched_probs)
         cosine_similarity = _cosine_similarity(original_probs, patched_probs)
         hellinger_distance = _hellinger_distance(original_probs, patched_probs)
-        bhattacharyya_coefficient = _bhattacharyya_coefficient(
-            original_probs, patched_probs
-        )
 
         return cls(
             s1_prob_original=original_s1_probs.mean().item(),
@@ -509,19 +310,23 @@ class ProbsMetrics:
             l2_distance=l2_distance,
             cosine_similarity=cosine_similarity,
             hellinger_distance=hellinger_distance,
-            bhattacharyya_coefficient=bhattacharyya_coefficient,
         )
 
     def summary(self) -> dict[str, float]:
         return {
             "KL": self.kl_divergence,
+            "JS": self.js_divergence,
+            "TV": self.total_variation,
+            "L2": self.l2_distance,
+            "cos_sim": self.cosine_similarity,
+            "Hellinger": self.hellinger_distance,
             "s1_prob_original": self.s1_prob_original,
             "s1_prob_patched": self.s1_prob_patched,
             "s1_prob_factor": self.s1_prob_factor,
+            "s1_logit_diff": self.s1_logit_diff,
             "s2_prob_original": self.s2_prob_original,
             "s2_prob_patched": self.s2_prob_patched,
             "s2_prob_factor": self.s2_prob_factor,
-            "s1_logit_diff": self.s1_logit_diff,
             "s2_logit_diff": self.s2_logit_diff,
         }
 

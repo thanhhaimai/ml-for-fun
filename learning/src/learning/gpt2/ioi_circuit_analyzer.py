@@ -339,43 +339,6 @@ class IoiCircuitAnalyzer:
 
         return logits_prepatched, logits_patched
 
-    def analyze_head_v2(
-        self,
-        captured_output: CapturedOutput,
-        block_idx: int,
-        head_idx: int,
-        s1: str,
-        s2: str,
-    ) -> HeadAnalysisResult:
-        s1_indices = torch.tensor([self.tokenizer.encode(f" {s1.strip()}")[0]])
-        s2_indices = torch.tensor([self.tokenizer.encode(f" {s2.strip()}")[0]])
-        assert_shape("s1_indices", s1_indices, (1,))
-        assert_shape("s2_indices", s2_indices, (1,))
-
-        prompt = self.prompt_template.from_abb(s1, s2)
-
-        logits_prepatched, logits_patched = self.path_patching(
-            PathPatchingConfig(
-                batch_size=1,
-                start_head=HeadId(block_idx, head_idx),
-                end_heads=[],
-            ),
-            captured_output,
-            [prompt],
-        )
-
-        original_probs = torch.softmax(logits_prepatched, dim=-1).squeeze(0)
-        patched_probs = torch.softmax(logits_patched, dim=-1).squeeze(0)
-        assert_shape("original_probs", original_probs, (self.V,))
-        assert_shape("patched_probs", patched_probs, (self.V,))
-
-        return HeadAnalysisResult(
-            original_probs=original_probs,
-            patched_probs=patched_probs,
-            s1_indices=s1_indices,
-            s2_indices=s2_indices,
-        )
-
     def analyze_head(
         self, config: PathPatchingConfig, baseline_output: CapturedOutput
     ) -> ProbsMetrics:
