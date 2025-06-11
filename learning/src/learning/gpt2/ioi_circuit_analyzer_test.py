@@ -2,9 +2,10 @@ import pytest
 import tiktoken
 import torch
 
+from learning.gpt2.data_sources import NamesDataSource
 from learning.gpt2.ioi_circuit_analyzer import IoiCircuitAnalyzer
 from learning.gpt2.model import GPT2, PretrainedName
-from learning.gpt2.prompts import NameSampler, PromptTemplate
+from learning.gpt2.prompts import PromptTemplate
 
 
 @pytest.fixture
@@ -22,8 +23,11 @@ def tokenizer() -> tiktoken.Encoding:
 
 
 @pytest.fixture
-def sampler(tokenizer: tiktoken.Encoding) -> NameSampler:
-    return NameSampler(names=["Mary", "John", "Tom", "Jerry"], tokenizer=tokenizer)
+def data_source(tokenizer: tiktoken.Encoding) -> NamesDataSource:
+    names = ["Mary", "John", "Tom", "Jerry"]
+    names_with_space = [f" {name}" for name in names]
+    indices = [indices[0] for indices in tokenizer.encode_batch(names_with_space)]
+    return NamesDataSource(names_with_space, indices)
 
 
 @pytest.fixture
@@ -34,12 +38,12 @@ def device() -> torch.device:
 def test_topk_logits(
     model: GPT2,
     tokenizer: tiktoken.Encoding,
-    sampler: NameSampler,
+    data_source: NamesDataSource,
     device: torch.device,
 ):
     prompt_template = PromptTemplate(
         template="When {s1} and {s2} went to the store, {s3} gave a drink to",
-        name_sampler=sampler,
+        names_data_source=data_source,
         device=device,
     )
     analyzer = IoiCircuitAnalyzer(model, tokenizer, prompt_template, device)

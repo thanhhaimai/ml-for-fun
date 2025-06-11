@@ -3,9 +3,10 @@ from dataclasses import dataclass
 import tiktoken
 import torch
 
+from learning.gpt2.data_sources import NameSample
 from learning.gpt2.metrics import ProbsMetrics
 from learning.gpt2.model import GPT2, HeadId
-from learning.gpt2.prompts import NameSample, PromptBatch, PromptTemplate
+from learning.gpt2.prompts import PromptBatch, PromptTemplate
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
@@ -259,7 +260,7 @@ class IoiCircuitAnalyzer:
         s2_indices = []
         s3_indices = []
         for name_sample in name_samples:
-            s1, s2, s3 = name_sample.names
+            s1, s2, s3 = name_sample.names_with_space
             prompts_abc.append(self.prompt_template.from_abc(s1, s2, s3))
             prompts_abb.append(self.prompt_template.from_abb(s1, s2))
             s1_indices.append(name_sample.indices[0])

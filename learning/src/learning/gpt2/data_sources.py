@@ -1,9 +1,17 @@
+import random
+from dataclasses import dataclass
 from typing import Self
 
 import tiktoken
 
 
-class PopularNamesDataSource:
+@dataclass
+class NameSample:
+    names_with_space: list[str]
+    indices: list[int]
+
+
+class NamesDataSource:
     """
     Data source for popular names that ensures all names (with space) are single tokens.
 
@@ -13,8 +21,11 @@ class PopularNamesDataSource:
     def __init__(
         self,
         names_with_space: list[str],
+        indices: list[int],
     ):
+        assert len(names_with_space) == len(indices)
         self.names_with_space = names_with_space
+        self.indices = indices
 
     @classmethod
     def load(
@@ -40,4 +51,21 @@ class PopularNamesDataSource:
             ]
             names_with_space = tokenizer.decode_batch(indices_with_space)
 
-            return cls(names_with_space)
+            indices = [
+                indices[0] for indices in tokenizer.encode_batch(names_with_space)
+            ]
+
+            return cls(names_with_space, indices)
+
+    def sample(self, num_names: int) -> NameSample:
+        sample_indices = random.sample(range(len(self.indices)), num_names)
+        names_with_space = [self.names_with_space[i] for i in sample_indices]
+        indices = [self.indices[i] for i in sample_indices]
+        return NameSample(names_with_space, indices)
+
+    def sample_batch(self, num_names: int, batch_size: int) -> list[NameSample]:
+        batches = []
+        for _ in range(batch_size):
+            batches.append(self.sample(num_names))
+
+        return batches

@@ -1,34 +1,51 @@
-import random
 from dataclasses import dataclass
-from typing import NamedTuple
 
-import tiktoken
 import torch
 
+from learning.gpt2.data_sources import NamesDataSource
 
-class NameSample(NamedTuple):
-    names: list[str]
-    indices: list[int]
+PLACES = [
+    " park",
+    " restaurant",
+    " library",
+    " museum",
+    " zoo",
+    " beach",
+    " mall",
+    " theater",
+]
 
 
-class NameSampler:
-    def __init__(self, names: list[str], tokenizer: tiktoken.Encoding):
-        self.names = names
-        self.indices = [tokenizer.encode(f" {name.strip()}")[0] for name in names]
+OBJECTS = [
+    " book",
+    " notebook",
+    " toy",
+    " gift",
+    " card",
+    " letter",
+    " drink",
+    " pen",
+    " pencil",
+]
 
-    def sample(self, num_names: int) -> list[str]:
-        return random.sample(self.names, num_names)
-
-    def sample_batch(self, num_names: int, batch_size: int) -> list[NameSample]:
-        batches = []
-        for _ in range(batch_size):
-            sample_indices = random.sample(range(len(self.indices)), num_names)
-            names = [self.names[i] for i in sample_indices]
-            indices = [self.indices[i] for i in sample_indices]
-
-            batches.append(NameSample(names, indices))
-
-        return batches
+# NOTE: there is no space in front of each slot because the token already includes a space
+IOI_TEMPLATES = [
+    "Then,{s1} and{s2} went to the{place}.{s3} gave a{object} to ",
+    "Then,{s1} and{s2} had a lot of fun at the{place}.{s3} gave a{object} to ",
+    "Then,{s1} and{s2} were working at the{place}.{s3} decided to give a{object} to ",
+    "Then,{s1} and{s2} were thinking about going to the{place}.{s3} wanted to give a{object} to ",
+    "Then,{s1} and{s2} had a long argument, and afterwards{s3} said to ",
+    "After{s1} and{s2} went to the{place},{s3} gave a{object} to ",
+    "When{s1} and{s2} got a{object} at the{place},{s3} decided to give it to ",
+    "When{s1} and{s2} got a{object} at the{place},{s3} decided to give the [OBJECT] to ",
+    "While{s1} and{s2} were working at the{place},{s3} gave a{object} to ",
+    "While{s1} and{s2} were commuting to the{place},{s3} gave a{object} to ",
+    "After the lunch,{s1} and{s2} went to the{place}.{s3} gave a{object} to ",
+    "Afterwards,{s1} and{s2} went to the{place}.{s3} gave a{object} to ",
+    "Then,{s1} and{s2} had a long argument. Afterwards{s3} said to ",
+    "The{place}{s1} and{s2} went to had a{object}.{s3} gave it to ",
+    "Friends{s1} and{s2} found a{object} at the{place}.{s3} gave it to ",
+]
 
 
 @dataclass
@@ -45,19 +62,24 @@ class PromptBatch:
 
 
 class PromptTemplate:
-    def __init__(self, template: str, name_sampler: NameSampler, device: torch.device):
+    def __init__(
+        self,
+        template: str,
+        names_data_source: NamesDataSource,
+        device: torch.device,
+    ):
         self.template = template
-        self.name_sampler = name_sampler
+        self.names_data_source = names_data_source
         self.device = device
 
     def sample_batch_abc(self, batch_size: int) -> PromptBatch:
-        name_samples = self.name_sampler.sample_batch(3, batch_size)
+        name_samples = self.names_data_source.sample_batch(3, batch_size)
         prompts = []
         s1_indices = []
         s2_indices = []
         s3_indices = []
         for name_sample in name_samples:
-            s1, s2, s3 = name_sample.names
+            s1, s2, s3 = name_sample.names_with_space
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s3))
             s1_indices.append(name_sample.indices[0])
             s2_indices.append(name_sample.indices[1])
@@ -71,12 +93,12 @@ class PromptTemplate:
         )
 
     def sample_batch_aba(self, batch_size: int) -> PromptBatch:
-        name_samples = self.name_sampler.sample_batch(2, batch_size)
+        name_samples = self.names_data_source.sample_batch(2, batch_size)
         prompts = []
         s1_indices = []
         s2_indices = []
         for name_sample in name_samples:
-            s1, s2 = name_sample.names
+            s1, s2 = name_sample.names_with_space
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s1))
             s1_indices.append(name_sample.indices[0])
             s2_indices.append(name_sample.indices[1])
@@ -89,12 +111,12 @@ class PromptTemplate:
         )
 
     def sample_batch_abb(self, batch_size: int) -> PromptBatch:
-        name_samples = self.name_sampler.sample_batch(2, batch_size)
+        name_samples = self.names_data_source.sample_batch(2, batch_size)
         prompts = []
         s1_indices = []
         s2_indices = []
         for name_sample in name_samples:
-            s1, s2 = name_sample.names
+            s1, s2 = name_sample.names_with_space
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s2))
             s1_indices.append(name_sample.indices[0])
             s2_indices.append(name_sample.indices[1])
@@ -107,15 +129,18 @@ class PromptTemplate:
         )
 
     def sample_abc(self) -> str:
-        s1, s2, s3 = self.name_sampler.sample(3)
+        name_sample = self.names_data_source.sample(3)
+        s1, s2, s3 = name_sample.names_with_space
         return self.template.format(s1=s1, s2=s2, s3=s3)
 
     def sample_aba(self) -> str:
-        s1, s2 = self.name_sampler.sample(2)
+        name_sample = self.names_data_source.sample(2)
+        s1, s2 = name_sample.names_with_space
         return self.template.format(s1=s1, s2=s2, s3=s1)
 
     def sample_abb(self) -> str:
-        s1, s2 = self.name_sampler.sample(2)
+        name_sample = self.names_data_source.sample(2)
+        s1, s2 = name_sample.names_with_space
         return self.template.format(s1=s1, s2=s2, s3=s2)
 
     def from_abc(self, s1, s2, s3) -> str:

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import tiktoken
 
-from learning.gpt2.popular_names_data_source import PopularNamesDataSource
+from learning.gpt2.data_sources import NamesDataSource
 
 
 @pytest.fixture
@@ -65,14 +65,8 @@ def empty_file():
     Path(f.name).unlink()
 
 
-def test_init_basic():
-    names = [" Alice", " Bob", " Charlie"]
-    data_source = PopularNamesDataSource(names)
-    assert data_source.names_with_space == names
-
-
 def test_load_basic_names(sample_file, tokenizer, sample_single_token_names):
-    data_source = PopularNamesDataSource.load(sample_file, tokenizer)
+    data_source = NamesDataSource.load(sample_file, tokenizer)
 
     print(data_source.names_with_space)
     print(sample_single_token_names)
@@ -87,7 +81,33 @@ def test_load_basic_names(sample_file, tokenizer, sample_single_token_names):
         [f" {name}" for name in sample_single_token_names]
     )
 
+    # The indices should be the indices of the names in the tokenizer
+    assert data_source.indices == [
+        tokenizer.encode(name)[0] for name in data_source.names_with_space
+    ]
+
 
 def test_load_empty_file(empty_file, tokenizer):
-    data_source = PopularNamesDataSource.load(empty_file, tokenizer)
+    data_source = NamesDataSource.load(empty_file, tokenizer)
     assert data_source.names_with_space == []
+
+
+def test_sample(sample_file, tokenizer):
+    data_source = NamesDataSource.load(sample_file, tokenizer)
+    sample = data_source.sample(3)
+    assert len(sample.names_with_space) == 3
+    assert len(sample.indices) == 3
+    for name, index in zip(sample.names_with_space, sample.indices):
+        assert tokenizer.encode(name)[0] == index
+
+
+def test_sample_batch(sample_file, tokenizer):
+    data_source = NamesDataSource.load(sample_file, tokenizer)
+    batch = data_source.sample_batch(3, 2)
+    assert len(batch) == 2
+    assert all(len(sample.names_with_space) == 3 for sample in batch)
+    assert all(len(sample.indices) == 3 for sample in batch)
+
+    for sample in batch:
+        for name, index in zip(sample.names_with_space, sample.indices):
+            assert tokenizer.encode(name)[0] == index
