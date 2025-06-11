@@ -162,7 +162,6 @@ class HeadId(NamedTuple):
 
 @dataclass
 class PathPatchingConfig:
-    batch_size: int
     start_head: HeadId
     end_heads: list[HeadId]
 
@@ -309,11 +308,25 @@ class IoiCircuitAnalyzer:
         return logits_prepatched, logits_patched
 
     def analyze_head(
-        self, config: PathPatchingConfig, baseline_output: CapturedOutput
+        self,
+        config: PathPatchingConfig,
+        baseline_output: CapturedOutput,
+        batch: PromptBatch,
     ) -> ProbsMetrics:
-        B = config.batch_size
+        """
+        Analyze a set of paths specified by `config`
 
-        batch = self.prompt_template.sample_batch_abb(config.batch_size)
+        The mean of `baseline_output` is used as the knockout baseline for the `config.start_head`.
+
+        The `baseline_output` is generated using a batch of random (s1, s2, s3) names.
+        By using the mean of the baseline output, we are effectively averaging out all the "noise" related to names.
+
+        Then, we patch the `config.start_head` output using this baseline. That effectively knocks out the `config.start_head`.
+        In other words, the contribution of the `config.start_head` to the output is removed.
+
+        Returns the metrics between the original abb output and the patched output.
+        """
+        B = len(batch.prompts)
 
         # This version of `analyze_head` average out the baseline before patching
         baseline = baseline_output.head_outputs[config.start_head.block_idx][
@@ -341,12 +354,23 @@ class IoiCircuitAnalyzer:
             s2_indices=batch.s2_indices,
         )
 
-    def analyze_head_pairwise(self, config: PathPatchingConfig) -> ProbsMetrics:
-        B = config.batch_size
+    def analyze_head_pairwise(
+        self, config: PathPatchingConfig, name_samples: list[NameSample]
+    ) -> ProbsMetrics:
+        """
+        Analyze a set of paths specified by `config`
 
-        name_samples = self.prompt_template.name_sampler.sample_batch(
-            3, config.batch_size
-        )
+        This version doesn't average out the baseline output.
+        Which means for each sample in the batch, the baseline use (s1, s2, s3) and the corresponding patched version use (s1, s2)
+        When we patch the `config.start_head` output, the other signal related to the meaning of (s1, s2, s3) is still there.
+
+        This is different from `analyze_head`; it doesn't effectively knock out the `config.start_head`.
+        We're comparing how much extra signal the `start_head` is getting from from replacing s2 with s3.
+
+        Returns the metrics between the original abb output and the patched output.
+        """
+        B = len(name_samples)
+
         prompts_abc = []
         prompts_abb = []
         s1_indices = []
