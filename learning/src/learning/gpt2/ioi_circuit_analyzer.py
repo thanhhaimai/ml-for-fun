@@ -5,7 +5,7 @@ from typing import NamedTuple
 import tiktoken
 import torch
 
-from learning.gpt2.metrics import DiffLogitsMetrics, ProbsMetrics
+from learning.gpt2.metrics import ProbsMetrics
 from learning.gpt2.model import GPT2
 
 
@@ -65,13 +65,10 @@ class PromptTemplate:
         s3_indices = []
         for name_sample in name_samples:
             s1, s2, s3 = name_sample.names
-            s1_idx = name_sample.indices[0]
-            s2_idx = name_sample.indices[1]
-            s3_idx = name_sample.indices[2]
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s3))
-            s1_indices.append(s1_idx)
-            s2_indices.append(s2_idx)
-            s3_indices.append(s3_idx)
+            s1_indices.append(name_sample.indices[0])
+            s2_indices.append(name_sample.indices[1])
+            s3_indices.append(name_sample.indices[2])
 
         return PromptBatch(
             prompts,
@@ -87,11 +84,9 @@ class PromptTemplate:
         s2_indices = []
         for name_sample in name_samples:
             s1, s2 = name_sample.names
-            s1_idx = name_sample.indices[0]
-            s2_idx = name_sample.indices[1]
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s1))
-            s1_indices.append(s1_idx)
-            s2_indices.append(s2_idx)
+            s1_indices.append(name_sample.indices[0])
+            s2_indices.append(name_sample.indices[1])
 
         return PromptBatch(
             prompts,
@@ -107,11 +102,9 @@ class PromptTemplate:
         s2_indices = []
         for name_sample in name_samples:
             s1, s2 = name_sample.names
-            s1_idx = name_sample.indices[0]
-            s2_idx = name_sample.indices[1]
             prompts.append(self.template.format(s1=s1, s2=s2, s3=s2))
-            s1_indices.append(s1_idx)
-            s2_indices.append(s2_idx)
+            s1_indices.append(name_sample.indices[0])
+            s2_indices.append(name_sample.indices[1])
 
         return PromptBatch(
             prompts,
@@ -144,27 +137,21 @@ class PromptTemplate:
 
 @dataclass
 class TopKProbsResult:
+    # shape: [k]
     top_probs: torch.Tensor
+    # shape: [k]
     top_indices: torch.Tensor
-
-
-@dataclass
-class CapturedOutputV1:
-    # Mean of the head outputs
-    # indexed by block_idx and head_idx
-    head_outputs: list[list[torch.Tensor]]
-
-    # Mean of the final probs
-    probs: torch.Tensor
 
 
 @dataclass
 class CapturedOutput:
     # Mean of the head outputs
     # indexed by block_idx and head_idx
+    # shape: [num_blocks, num_heads, B, S, H]
     head_outputs: list[list[torch.Tensor]]
 
     # Mean of the final logits
+    # shape: [B, V]
     logits: torch.Tensor
 
 
@@ -178,15 +165,6 @@ class PathPatchingConfig:
     batch_size: int
     start_head: HeadId
     end_heads: list[HeadId]
-
-
-@dataclass
-class HeadAnalysisResult:
-    original_probs: torch.Tensor
-    patched_probs: torch.Tensor
-    s1_indices: torch.Tensor
-    s2_indices: torch.Tensor
-    # metrics: DiffLogitsMetrics
 
 
 class IoiCircuitAnalyzer:
@@ -250,9 +228,6 @@ class IoiCircuitAnalyzer:
         logits_abc = self.forward(prompts_abc)
         assert_shape("logits_abc", logits_abc, (B, self.V))
 
-        mean_logits_abc = logits_abc.mean(dim=0, keepdim=True)
-        assert_shape("mean_logits_abc", mean_logits_abc, (1, self.V))
-
         results = []
         for block_idx in range(self.model.config.num_blocks):
             block_results = []
@@ -263,15 +238,12 @@ class IoiCircuitAnalyzer:
                 S = head_output.shape[1]
                 assert_shape("head_output", head_output, (B, S, self.H))
 
-                mean_output = head_output.mean(dim=0, keepdim=True)
-                assert_shape("mean_output", mean_output, (1, S, self.H))
-
-                block_results.append(mean_output)
+                block_results.append(head_output)
             results.append(block_results)
 
         return CapturedOutput(
             head_outputs=results,
-            logits=mean_logits_abc,
+            logits=logits_abc,
         )
 
     def path_patching(
@@ -289,7 +261,7 @@ class IoiCircuitAnalyzer:
         ]
         B = len(prompts_abb)
         S = baseline.shape[1]
-        assert_shape("baseline", baseline, (1, S, self.H))
+        assert_shape("baseline", baseline, (B, S, self.H))
 
         # ================================
         # Phase B: capture the ABB output
@@ -306,9 +278,6 @@ class IoiCircuitAnalyzer:
         # Effectively, we're knocking out the start_head output
         # If the head is not important, the patched output should be close to the ABB output
         # NOTE: the patched output is not used within this phase (it is used in Phase D)
-        baseline = baseline.expand(B, S, self.H)
-        assert_shape("baseline", baseline, (B, S, self.H))
-
         self.model.blocks[config.start_head.block_idx].attention.heads[
             config.start_head.head_idx
         ].frozen_output = baseline
@@ -346,6 +315,17 @@ class IoiCircuitAnalyzer:
 
         batch = self.prompt_template.sample_batch_abb(config.batch_size)
 
+        # This version of `analyze_head` average out the baseline before patching
+        baseline = baseline_output.head_outputs[config.start_head.block_idx][
+            config.start_head.head_idx
+        ]
+        S = baseline.shape[1]
+        assert_shape("baseline", baseline, (B, S, self.H))
+        baseline = baseline.mean(dim=0, keepdim=True)
+        assert_shape("baseline", baseline, (1, S, self.H))
+        baseline = baseline.expand(B, S, self.H)
+        assert_shape("baseline", baseline, (B, S, self.H))
+
         logits_prepatched, logits_patched = self.path_patching(
             config,
             baseline_output,
@@ -361,87 +341,39 @@ class IoiCircuitAnalyzer:
             s2_indices=batch.s2_indices,
         )
 
-    def analyze_head_pairwise(self, config: PathPatchingConfig) -> DiffLogitsMetrics:
-        s1_logits: list[float] = []
-        s2_logits: list[float] = []
-        s1_probs: list[float] = []
-        s2_probs: list[float] = []
+    def analyze_head_pairwise(self, config: PathPatchingConfig) -> ProbsMetrics:
+        B = config.batch_size
 
-        for s1, s2, s3 in self.prompt_template.name_sampler.sample_batch(
+        name_samples = self.prompt_template.name_sampler.sample_batch(
             3, config.batch_size
-        ):
-            s1 = "Mary"
-            s2 = "John"
-            s3 = "Jerry"
+        )
+        prompts_abc = []
+        prompts_abb = []
+        s1_indices = []
+        s2_indices = []
+        s3_indices = []
+        for name_sample in name_samples:
+            s1, s2, s3 = name_sample.names
+            prompts_abc.append(self.prompt_template.from_abc(s1, s2, s3))
+            prompts_abb.append(self.prompt_template.from_abb(s1, s2))
+            s1_indices.append(name_sample.indices[0])
+            s2_indices.append(name_sample.indices[1])
+            s3_indices.append(name_sample.indices[2])
 
-            s1_idx = self.tokenizer.encode(f" {s1.strip()}")[0]
-            s2_idx = self.tokenizer.encode(f" {s2.strip()}")[0]
+        # This version of `analyze_head_pairwise` keeps the baseline output matching 1:1 to the patched output
+        baseline_output = self.capture_baseline_output(prompts_abc)
 
-            prompt_abc = self.prompt_template.from_abc(s1, s2, s3)
-            prompt_aba = self.prompt_template.from_aba(s1, s2)
+        logits_prepatched, logits_patched = self.path_patching(
+            config,
+            baseline_output,
+            prompts_abb,
+        )
+        assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
+        assert_shape("logits_patched", logits_patched, (B, self.V))
 
-            print(f"{prompt_abc=}")
-            baseline_output = self.capture_baseline_output([prompt_abc])
-            baseline_probs = torch.softmax(baseline_output.logits, dim=-1)
-            top_probs, top_indices = torch.topk(baseline_probs.squeeze(0), k=3)
-            assert_shape("top_probs", top_probs, (3,))
-            assert_shape("top_indices", top_indices, (3,))
-            for i in range(3):
-                indices = [int(top_indices[i])]
-                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
-
-            logits_prepatched, logits_patched = self.path_patching(
-                config,
-                baseline_output,
-                [prompt_aba],
-            )
-            assert_shape("logits_prepatched", logits_prepatched, (1, self.V))
-            assert_shape("logits_patched", logits_patched, (1, self.V))
-
-            print(f"{prompt_aba=}")
-            probs_prepatched = torch.softmax(logits_prepatched, dim=-1)
-            assert_shape("probs_prepatched", probs_prepatched, (1, self.V))
-            top_probs, top_indices = torch.topk(probs_prepatched.squeeze(0), k=3)
-            assert_shape("top_probs", top_probs, (3,))
-            assert_shape("top_indices", top_indices, (3,))
-            for i in range(3):
-                indices = [int(top_indices[i])]
-                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
-
-            print(f"{prompt_aba=}")
-            probs_patched = torch.softmax(logits_patched, dim=-1)
-            assert_shape("probs_patched", probs_patched, (1, self.V))
-            top_probs, top_indices = torch.topk(probs_patched.squeeze(0), k=3)
-            assert_shape("top_probs", top_probs, (3,))
-            assert_shape("top_indices", top_indices, (3,))
-            for i in range(3):
-                indices = [int(top_indices[i])]
-                print(f"{top_probs[i]:.4f} {self.tokenizer.decode(indices)}")
-
-            logits_diff = logits_patched - logits_prepatched
-            assert_shape("logits_diff", logits_diff, (1, self.V))
-
-            probs_diff = probs_patched - probs_prepatched
-            assert_shape("probs_diff", probs_diff, (1, self.V))
-
-            s1_logit_diff = logits_diff[0, s1_idx].item()
-            s2_logit_diff = logits_diff[0, s2_idx].item()
-            s1_prob_diff = probs_diff[0, s1_idx].item()
-            s2_prob_diff = probs_diff[0, s2_idx].item()
-
-            s1_logits.append(s1_logit_diff)
-            s2_logits.append(s2_logit_diff)
-            s1_probs.append(s1_prob_diff)
-            s2_probs.append(s2_prob_diff)
-
-        mean_s1_logits = torch.tensor(s1_logits, device=self.device).mean().item()
-        mean_s2_logits = torch.tensor(s2_logits, device=self.device).mean().item()
-        mean_s1_probs = torch.tensor(s1_probs, device=self.device).mean().item()
-        mean_s2_probs = torch.tensor(s2_probs, device=self.device).mean().item()
-
-        return DiffLogitsMetrics(
-            s1_logit=mean_s1_logits,
-            s2_logit=mean_s2_logits,
-            s1_prob=mean_s1_probs,
-            s2_prob=mean_s2_probs,
+        return ProbsMetrics.from_logits(
+            original_logits=logits_prepatched,
+            patched_logits=logits_patched,
+            s1_indices=torch.tensor(s1_indices, device=self.device),
+            s2_indices=torch.tensor(s2_indices, device=self.device),
         )
