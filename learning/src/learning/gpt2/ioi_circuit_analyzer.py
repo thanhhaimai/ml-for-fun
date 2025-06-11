@@ -39,7 +39,8 @@ class NameSampler:
         return batches
 
 
-class PromptBatch(NamedTuple):
+@dataclass
+class PromptBatch:
     # The prompts uses s1, s2, s3 as placeholders
     # The indices are the indices of the s1, s2, s3 tokens
     prompts: list[str]
@@ -352,6 +353,7 @@ class IoiCircuitAnalyzer:
             patched_logits=logits_patched,
             s1_indices=batch.s1_indices,
             s2_indices=batch.s2_indices,
+            s3_indices=batch.s3_indices,
         )
 
     def analyze_head_pairwise(
@@ -400,4 +402,5 @@ class IoiCircuitAnalyzer:
             patched_logits=logits_patched,
             s1_indices=torch.tensor(s1_indices, device=self.device),
             s2_indices=torch.tensor(s2_indices, device=self.device),
+            s3_indices=torch.tensor(s3_indices, device=self.device),
         )

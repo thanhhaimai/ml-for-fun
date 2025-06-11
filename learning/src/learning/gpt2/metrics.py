@@ -229,14 +229,18 @@ class ProbsMetrics:
     # Logits Metrics
     s1_prob_original: float
     s2_prob_original: float
+    s3_prob_original: float
     s1_prob_patched: float
     s2_prob_patched: float
+    s3_prob_patched: float
     s1_prob_factor: float
     s2_prob_factor: float
+    s3_prob_factor: float
 
     # Logits Metrics
     s1_logit_diff: float
     s2_logit_diff: float
+    s3_logit_diff: float
 
     # Probs Metrics
     kl_divergence: float
@@ -253,14 +257,17 @@ class ProbsMetrics:
         patched_logits: torch.Tensor,
         s1_indices: torch.Tensor,
         s2_indices: torch.Tensor,
+        s3_indices: torch.Tensor,
     ) -> Self:
         B, V = original_logits.shape
         assert_shape("original_logits", original_logits, (B, V))
         assert_shape("patched_logits", patched_logits, (B, V))
         s1_indices = s1_indices.unsqueeze(-1)
         s2_indices = s2_indices.unsqueeze(-1)
+        s3_indices = s3_indices.unsqueeze(-1)
         assert_shape("s1_indices", s1_indices, (B, 1))
         assert_shape("s2_indices", s2_indices, (B, 1))
+        assert_shape("s3_indices", s3_indices, (B, 1))
 
         original_probs = torch.softmax(original_logits, dim=-1)
         patched_probs = torch.softmax(patched_logits, dim=-1)
@@ -269,24 +276,32 @@ class ProbsMetrics:
 
         original_s1_probs = original_probs.gather(dim=-1, index=s1_indices)
         original_s2_probs = original_probs.gather(dim=-1, index=s2_indices)
+        original_s3_probs = original_probs.gather(dim=-1, index=s3_indices)
         patched_s1_probs = patched_probs.gather(dim=-1, index=s1_indices)
         patched_s2_probs = patched_probs.gather(dim=-1, index=s2_indices)
+        patched_s3_probs = patched_probs.gather(dim=-1, index=s3_indices)
         assert_shape("original_s1_probs", original_s1_probs, (B, 1))
         assert_shape("original_s2_probs", original_s2_probs, (B, 1))
+        assert_shape("original_s3_probs", original_s3_probs, (B, 1))
         assert_shape("patched_s1_probs", patched_s1_probs, (B, 1))
         assert_shape("patched_s2_probs", patched_s2_probs, (B, 1))
+        assert_shape("patched_s3_probs", patched_s3_probs, (B, 1))
 
         probs_factor = patched_probs / original_probs
         s1_prob_factor = probs_factor.gather(dim=-1, index=s1_indices)
         s2_prob_factor = probs_factor.gather(dim=-1, index=s2_indices)
+        s3_prob_factor = probs_factor.gather(dim=-1, index=s3_indices)
         assert_shape("s1_prob_factor", s1_prob_factor, (B, 1))
         assert_shape("s2_prob_factor", s2_prob_factor, (B, 1))
+        assert_shape("s3_prob_factor", s3_prob_factor, (B, 1))
 
         diff_logits = patched_logits - original_logits
         s1_logit_diff = diff_logits.gather(dim=-1, index=s1_indices)
         s2_logit_diff = diff_logits.gather(dim=-1, index=s2_indices)
+        s3_logit_diff = diff_logits.gather(dim=-1, index=s3_indices)
         assert_shape("s1_logit_diff", s1_logit_diff, (B, 1))
         assert_shape("s2_logit_diff", s2_logit_diff, (B, 1))
+        assert_shape("s3_logit_diff", s3_logit_diff, (B, 1))
 
         kl_divergence = _kl_divergence(original_probs, patched_probs)
         js_divergence = _js_divergence(original_probs, patched_probs)
@@ -298,12 +313,16 @@ class ProbsMetrics:
         return cls(
             s1_prob_original=original_s1_probs.mean().item(),
             s2_prob_original=original_s2_probs.mean().item(),
+            s3_prob_original=original_s3_probs.mean().item(),
             s1_prob_patched=patched_s1_probs.mean().item(),
             s2_prob_patched=patched_s2_probs.mean().item(),
+            s3_prob_patched=patched_s3_probs.mean().item(),
             s1_prob_factor=s1_prob_factor.mean().item(),
             s2_prob_factor=s2_prob_factor.mean().item(),
+            s3_prob_factor=s3_prob_factor.mean().item(),
             s1_logit_diff=s1_logit_diff.mean().item(),
             s2_logit_diff=s2_logit_diff.mean().item(),
+            s3_logit_diff=s3_logit_diff.mean().item(),
             kl_divergence=kl_divergence,
             js_divergence=js_divergence,
             total_variation=total_variation,
@@ -328,6 +347,10 @@ class ProbsMetrics:
             "s2_prob_patched": self.s2_prob_patched,
             "s2_prob_factor": self.s2_prob_factor,
             "s2_logit_diff": self.s2_logit_diff,
+            "s3_prob_original": self.s3_prob_original,
+            "s3_prob_patched": self.s3_prob_patched,
+            "s3_prob_factor": self.s3_prob_factor,
+            "s3_logit_diff": self.s3_logit_diff,
         }
 
     @classmethod
