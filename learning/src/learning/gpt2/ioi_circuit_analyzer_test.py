@@ -42,7 +42,7 @@ def test_topk_logits(
     device: torch.device,
 ):
     prompt_template = PromptTemplate(
-        template="When {s1} and {s2} went to the store, {s3} gave a drink to",
+        template="When{s1} and{s2} went to the store,{s3} gave a drink to",
         names_data_source=data_source,
         device=device,
     )

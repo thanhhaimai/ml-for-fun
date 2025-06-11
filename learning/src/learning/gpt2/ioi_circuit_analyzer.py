@@ -21,6 +21,11 @@ class TopKProbsResult:
     # shape: [k]
     top_indices: torch.Tensor
 
+    def print(self, tokenizer: tiktoken.Encoding):
+        for i in range(len(self.top_probs)):
+            indices = [int(self.top_indices[i])]
+            print(f"{self.top_probs[i]:.2f} {tokenizer.decode(indices)}")
+
 
 @dataclass
 class CapturedOutput:
