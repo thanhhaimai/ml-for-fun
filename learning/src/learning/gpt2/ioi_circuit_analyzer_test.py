@@ -25,8 +25,8 @@ def tokenizer() -> tiktoken.Encoding:
 
 
 @pytest.fixture
-def sampler() -> NameSampler:
-    return NameSampler(names=["Mary", "John", "Tom", "Jerry"])
+def sampler(tokenizer: tiktoken.Encoding) -> NameSampler:
+    return NameSampler(names=["Mary", "John", "Tom", "Jerry"], tokenizer=tokenizer)
 
 
 @pytest.fixture
@@ -43,6 +43,7 @@ def test_topk_logits(
     prompt_template = PromptTemplate(
         template="When {s1} and {s2} went to the store, {s3} gave a drink to",
         name_sampler=sampler,
+        device=device,
     )
     analyzer = IoiCircuitAnalyzer(model, tokenizer, prompt_template, device)
     result = analyzer.topk_probs(prompt_template.from_abb("Mary", "John"), k=1)

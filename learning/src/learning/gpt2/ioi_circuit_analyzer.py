@@ -5,7 +5,7 @@ from typing import NamedTuple
 import tiktoken
 import torch
 
-from learning.gpt2.metrics import DiffLogitsMetrics
+from learning.gpt2.metrics import DiffLogitsMetrics, ProbsMetrics
 from learning.gpt2.model import GPT2
 
 
@@ -14,30 +14,111 @@ def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
         raise ValueError(f"Invalid shape: {name}={tensor.shape}, expected: {shape=}")
 
 
+class NameSample(NamedTuple):
+    names: list[str]
+    indices: list[int]
+
+
 class NameSampler:
-    def __init__(self, names: list[str]):
+    def __init__(self, names: list[str], tokenizer: tiktoken.Encoding):
         self.names = names
+        self.indices = [tokenizer.encode(f" {name.strip()}")[0] for name in names]
 
     def sample(self, num_names: int) -> list[str]:
         return random.sample(self.names, num_names)
 
-    def sample_batch(self, num_names: int, batch_size: int) -> list[list[str]]:
-        return [self.sample(num_names) for _ in range(batch_size)]
+    def sample_batch(self, num_names: int, batch_size: int) -> list[NameSample]:
+        batches = []
+        for _ in range(batch_size):
+            sample_indices = random.sample(range(len(self.indices)), num_names)
+            names = [self.names[i] for i in sample_indices]
+            indices = [self.indices[i] for i in sample_indices]
+
+            batches.append(NameSample(names, indices))
+
+        return batches
+
+
+class PromptBatch(NamedTuple):
+    # The prompts uses s1, s2, s3 as placeholders
+    # The indices are the indices of the s1, s2, s3 tokens
+    prompts: list[str]
+    # shape: [B]
+    s1_indices: torch.Tensor
+    # shape: [B]
+    s2_indices: torch.Tensor
+    # shape: [B]
+    s3_indices: torch.Tensor
 
 
 class PromptTemplate:
-    def __init__(self, template: str, name_sampler: NameSampler):
+    def __init__(self, template: str, name_sampler: NameSampler, device: torch.device):
         self.template = template
         self.name_sampler = name_sampler
+        self.device = device
 
-    def sample_batch_abc(self, batch_size: int) -> list[str]:
-        return [self.sample_abc() for _ in range(batch_size)]
+    def sample_batch_abc(self, batch_size: int) -> PromptBatch:
+        name_samples = self.name_sampler.sample_batch(3, batch_size)
+        prompts = []
+        s1_indices = []
+        s2_indices = []
+        s3_indices = []
+        for name_sample in name_samples:
+            s1, s2, s3 = name_sample.names
+            s1_idx = name_sample.indices[0]
+            s2_idx = name_sample.indices[1]
+            s3_idx = name_sample.indices[2]
+            prompts.append(self.template.format(s1=s1, s2=s2, s3=s3))
+            s1_indices.append(s1_idx)
+            s2_indices.append(s2_idx)
+            s3_indices.append(s3_idx)
 
-    def sample_batch_aba(self, batch_size: int) -> list[str]:
-        return [self.sample_aba() for _ in range(batch_size)]
+        return PromptBatch(
+            prompts,
+            torch.tensor(s1_indices, device=self.device),
+            torch.tensor(s2_indices, device=self.device),
+            torch.tensor(s3_indices, device=self.device),
+        )
 
-    def sample_batch_abb(self, batch_size: int) -> list[str]:
-        return [self.sample_abb() for _ in range(batch_size)]
+    def sample_batch_aba(self, batch_size: int) -> PromptBatch:
+        name_samples = self.name_sampler.sample_batch(2, batch_size)
+        prompts = []
+        s1_indices = []
+        s2_indices = []
+        for name_sample in name_samples:
+            s1, s2 = name_sample.names
+            s1_idx = name_sample.indices[0]
+            s2_idx = name_sample.indices[1]
+            prompts.append(self.template.format(s1=s1, s2=s2, s3=s1))
+            s1_indices.append(s1_idx)
+            s2_indices.append(s2_idx)
+
+        return PromptBatch(
+            prompts,
+            torch.tensor(s1_indices, device=self.device),
+            torch.tensor(s2_indices, device=self.device),
+            torch.tensor(s1_indices, device=self.device),
+        )
+
+    def sample_batch_abb(self, batch_size: int) -> PromptBatch:
+        name_samples = self.name_sampler.sample_batch(2, batch_size)
+        prompts = []
+        s1_indices = []
+        s2_indices = []
+        for name_sample in name_samples:
+            s1, s2 = name_sample.names
+            s1_idx = name_sample.indices[0]
+            s2_idx = name_sample.indices[1]
+            prompts.append(self.template.format(s1=s1, s2=s2, s3=s2))
+            s1_indices.append(s1_idx)
+            s2_indices.append(s2_idx)
+
+        return PromptBatch(
+            prompts,
+            torch.tensor(s1_indices, device=self.device),
+            torch.tensor(s2_indices, device=self.device),
+            torch.tensor(s2_indices, device=self.device),
+        )
 
     def sample_abc(self) -> str:
         s1, s2, s3 = self.name_sampler.sample(3)
@@ -297,66 +378,24 @@ class IoiCircuitAnalyzer:
 
     def analyze_head(
         self, config: PathPatchingConfig, baseline_output: CapturedOutput
-    ) -> DiffLogitsMetrics:
+    ) -> ProbsMetrics:
         B = config.batch_size
 
-        names = self.prompt_template.name_sampler.sample_batch(2, config.batch_size)
-        prompts_abb = [self.prompt_template.from_abb(s1, s2) for s1, s2 in names]
-
-        s1_indices = torch.tensor(
-            [self.tokenizer.encode(f" {s1.strip()}")[0] for s1, _ in names]
-        )
-        assert_shape("s1_indices", s1_indices, (B,))
-
-        s2_indices = torch.tensor(
-            [self.tokenizer.encode(f" {s2.strip()}")[0] for _, s2 in names]
-        )
-        assert_shape("s2_indices", s2_indices, (B,))
+        batch = self.prompt_template.sample_batch_abb(config.batch_size)
 
         logits_prepatched, logits_patched = self.path_patching(
             config,
             baseline_output,
-            prompts_abb,
+            batch.prompts,
         )
         assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
         assert_shape("logits_patched", logits_patched, (B, self.V))
 
-        s1_logits_prepatched = logits_prepatched[:, s1_indices]
-        assert_shape("s1_logits_prepatched", s1_logits_prepatched, (B, 1))
-        s2_logits_prepatched = logits_prepatched[:, s2_indices]
-        assert_shape("s2_logits_prepatched", s2_logits_prepatched, (B, 1))
-
-        s1_logits_patched = logits_patched[:, s1_indices]
-        assert_shape("s1_logits_patched", s1_logits_patched, (B, 1))
-        s2_logits_patched = logits_patched[:, s2_indices]
-        assert_shape("s2_logits_patched", s2_logits_patched, (B, 1))
-
-        s1_logit_diff = (
-            s1_logits_patched.mean(dim=0) - s1_logits_prepatched.mean(dim=0)
-        ).item()
-        s2_logit_diff = (
-            s2_logits_patched.mean(dim=0) - s2_logits_prepatched.mean(dim=0)
-        ).item()
-
-        probs_prepatched = torch.softmax(logits_prepatched, dim=-1)
-        assert_shape("probs_prepatched", probs_prepatched, (B, self.V))
-        probs_patched = torch.softmax(logits_patched, dim=-1)
-        assert_shape("probs_patched", probs_patched, (B, self.V))
-
-        s1_prob_diff = (
-            probs_patched[:, s1_indices].mean(dim=0)
-            - probs_prepatched[:, s1_indices].mean(dim=0)
-        ).item()
-        s2_prob_diff = (
-            probs_patched[:, s2_indices].mean(dim=0)
-            - probs_prepatched[:, s2_indices].mean(dim=0)
-        ).item()
-
-        return DiffLogitsMetrics(
-            s1_logit=s1_logit_diff,
-            s2_logit=s2_logit_diff,
-            s1_prob=s1_prob_diff,
-            s2_prob=s2_prob_diff,
+        return ProbsMetrics.from_logits(
+            original_logits=logits_prepatched,
+            patched_logits=logits_patched,
+            s1_indices=batch.s1_indices,
+            s2_indices=batch.s2_indices,
         )
 
     def analyze_head_pairwise(self, config: PathPatchingConfig) -> DiffLogitsMetrics:
