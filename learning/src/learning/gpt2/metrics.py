@@ -352,7 +352,3 @@ class ProbsMetrics:
             "s3_prob_factor": self.s3_prob_factor,
             "s3_logit_diff": self.s3_logit_diff,
         }
-
-    @classmethod
-    def merge_df(cls, metrics: list[Self]) -> pd.DataFrame:
-        return pd.DataFrame([m.summary() for m in metrics])
