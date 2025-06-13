@@ -1,7 +1,9 @@
+import math
 from typing import Self
 
 import pandas as pd
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from learning.gpt2.metrics import ProbsMetrics
 
@@ -66,39 +68,51 @@ class Plotter:
         """Get summary statistics across all layers and heads for each metric."""
         return self.df.describe()
 
-    def plot_kl(
+    def plot_metric(
         self,
         fig: go.Figure,
+        metric_name: str,
+        name: str | None = None,
+        colorscale: str = "blues",
         row: int | None = None,
         col: int | None = None,
         colorbar: dict | None = None,
+        show_colorbar: bool = True,
     ) -> go.Figure:
         """
-        Plot KL divergence heatmap.
+        Generic function to plot any metric as a heatmap.
 
         Args:
             fig: plotly figure to add to (required)
-            row: Row position for subplot (1-indexed)
-            col: Column position for subplot (1-indexed)
+            metric_name: The name of the metric to retrieve from the DataFrame.
+            name: Optional display name for the trace. If None, generated from metric_name.
+            colorscale: Optional colorscale name. If None, a default is chosen.
+            row: Row position for subplot (1-indexed).
+            col: Column position for subplot (1-indexed).
             colorbar: Optional colorbar configuration dictionary.
+            show_colorbar: Whether to display the colorbar for this heatmap.
 
         Returns:
             plotly.graph_objects.Figure
         """
-        kl_pd = self.get_metric("KL")
+        metric_df = self.get_metric(metric_name)
 
-        # Add as subplot
+        # Auto-generate a display name if not provided
+        display_name = name or metric_name.replace("_", " ").title()
+
         heatmap = go.Heatmap(
-            z=kl_pd.values,
-            x=kl_pd.columns,
-            y=kl_pd.index,
-            text=kl_pd.round(4).values,
+            z=metric_df.values,
+            x=metric_df.columns,
+            y=metric_df.index,
+            text=metric_df.round(2).values,
             texttemplate="%{text}",
-            textfont={"size": 14},
-            colorscale="reds",
-            name="KL Divergence",
+            textfont={"size": 10},
+            colorscale=colorscale,
+            name=display_name,
             colorbar=colorbar,
+            showscale=show_colorbar,
         )
+
         fig.add_trace(heatmap, row=row, col=col)
         fig.update_xaxes(tickmode="linear", tick0=0, dtick=1, row=row, col=col)
         fig.update_yaxes(
@@ -107,108 +121,56 @@ class Plotter:
             dtick=1,
             row=row,
             col=col,
-            scaleanchor="x",
-            scaleratio=1,
-            constrain="domain",
         )
 
         return fig
 
-    def plot_s1_factor(
+    def plot_metrics(
         self,
-        fig: go.Figure,
-        row: int | None = None,
-        col: int | None = None,
-        colorbar: dict | None = None,
+        metric_names: list[str],
+        cols: int | None = None,
+        show_colorbars: bool = True,
+        **kwargs,
     ) -> go.Figure:
         """
-        Plot S1 Prob Factor heatmap.
+        Plots a grid of heatmaps for a given list of metric names.
 
         Args:
-            fig: plotly figure to add to (required)
-            row: Row position for subplot (1-indexed)
-            col: Column position for subplot (1-indexed)
-            colorbar: Optional colorbar configuration dictionary.
+            metric_names: A list of metric names to plot.
+            cols: Optional number of columns in the subplot grid. If None,
+                  a reasonable default is used (3 or less).
+            show_colorbars: Whether to display the colorbars for the heatmaps.
+            **kwargs: Additional keyword arguments passed to make_subplots
+                      (e.g., horizontal_spacing, vertical_spacing).
 
         Returns:
-            plotly.graph_objects.Figure
+            A plotly.graph_objects.Figure with the generated subplots.
         """
-        s1_prob_factor_df = self.get_metric("s1_prob_factor")
+        if not metric_names:
+            return go.Figure()
 
-        # Add as subplot
-        heatmap = go.Heatmap(
-            z=s1_prob_factor_df.values,
-            x=s1_prob_factor_df.columns,
-            y=s1_prob_factor_df.index,
-            text=s1_prob_factor_df.round(4).values,
-            texttemplate="%{text}",
-            textfont={"size": 14},
-            colorscale="blues",
-            name="S1 Prob Factor",
-            colorbar=colorbar,
-        )
-        fig.add_trace(heatmap, row=row, col=col)
-        fig.update_xaxes(tickmode="linear", tick0=0, dtick=1, row=row, col=col)
-        fig.update_yaxes(
-            tickmode="linear",
-            tick0=0,
-            dtick=1,
-            row=row,
-            col=col,
-            scaleanchor="x",
-            scaleratio=1,
-            constrain="domain",
+        n_metrics = len(metric_names)
+        n_cols = min(cols, n_metrics) if cols is not None else min(3, n_metrics)
+        n_rows = math.ceil(n_metrics / n_cols)
+
+        subplot_titles = [name.replace("_", " ").title() for name in metric_names]
+        fig = make_subplots(
+            rows=n_rows,
+            cols=n_cols,
+            subplot_titles=subplot_titles,
+            **kwargs,
         )
 
+        for i, metric_name in enumerate(metric_names):
+            row = i // n_cols + 1
+            col = i % n_cols + 1
+            self.plot_metric(
+                fig,
+                metric_name=metric_name,
+                row=row,
+                col=col,
+                show_colorbar=show_colorbars,
+            )
+
+        fig.update_layout(height=n_rows * 400, title_text="Metric Analysis")
         return fig
-
-
-"""
-Example Usage:
-
-# Assume you have metrics: list[list[ProbsMetrics]]
-# where metrics[layer][head] gives you a ProbsMetrics object
-
-# Create the 3D-like DataFrame
-plotter = Plotter.from_metrics(metrics)
-
-# Access the MultiIndex DataFrame
-df_3d = plotter.df
-print(df_3d.shape)  # (num_layers * num_heads, 18 metrics)
-
-# Get a specific metric across all layers and heads as a 2D matrix
-kl_matrix = plotter.get_metric('KL')  # Shape: (num_layers, num_heads)
-js_matrix = plotter.get_metric('JS')
-
-# Get all metrics for layer 0 (across all heads)
-layer_0_data = plotter.get_layer(0)  # Shape: (num_heads, 18 metrics)
-
-# Get all metrics for head 1 (across all layers)  
-head_1_data = plotter.get_head(1)  # Shape: (num_layers, 18 metrics)
-
-# Summary statistics across all layers/heads
-stats = plotter.summary_stats()
-
-# Wide format (alternative representation)
-plotter_wide = Plotter.from_metrics_wide(metrics)
-df_wide = plotter_wide.df  # Shape: (18 metrics, num_layers * num_heads)
-
-# Accessing specific combinations:
-# Layer 2, Head 5, KL divergence
-kl_value = plotter.df.loc[(2, 5), 'KL']
-
-# All KL values as a flat series
-all_kl = plotter.df['KL']
-
-# Plotting examples:
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-# Heatmap of KL divergence across layers and heads
-plt.figure(figsize=(10, 6))
-sns.heatmap(plotter.get_metric('KL'), annot=True, cmap='viridis')
-plt.title('KL Divergence: Layers vs Heads')
-plt.xlabel('Head')
-plt.ylabel('Layer')
-plt.show()
-"""
