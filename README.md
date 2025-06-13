@@ -1,13 +1,7 @@
-# uv-repo-template
+# What is this
 
-A template repo with most common python tooling setup (uv, pre-commit, ruff, pytest,...)
+This repo contains the collection of my toy models. For fun.
 
-## Setup
+It may contain bugs. It may not work outside of my specific setup.
 
-- [ ] Manual install `brew` -- <https://brew.sh/>
-
-- [ ] Run `setup/setup.sh` for one time setup. The script is idempotent, so it's okay to re-run if the setup changes.
-
-## Acknowledgments
-
-Dataset is from https://github.com/stefan-it/nmt-en-vi
+MIT License
