@@ -3,10 +3,10 @@ from dataclasses import dataclass
 import tiktoken
 import torch
 
-from learning.gpt2.data_sources import NameSample
-from learning.gpt2.metrics import ProbsMetrics
-from learning.gpt2.model import GPT2, HeadId
-from learning.gpt2.prompts import PromptBatch, PromptTemplate
+from learning.ioi_circuit.data_sources import NameSample
+from learning.ioi_circuit.metrics import ProbsMetrics
+from learning.ioi_circuit.model import GPT2, HeadId
+from learning.ioi_circuit.prompts import PromptBatch, PromptTemplate
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):

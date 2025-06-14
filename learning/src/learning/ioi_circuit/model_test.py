@@ -3,7 +3,7 @@ import tiktoken
 import torch
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
-from learning.gpt2.model import GPT2, PretrainedName
+from learning.ioi_circuit.model import GPT2, PretrainedName
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):

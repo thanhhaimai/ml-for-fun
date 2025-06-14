@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import torch
 
-from learning.gpt2.data_sources import NamesDataSource
+from learning.ioi_circuit.data_sources import NamesDataSource
 
 PLACES = [
     " park",

@@ -2,10 +2,10 @@ import pytest
 import tiktoken
 import torch
 
-from learning.gpt2.data_sources import NamesDataSource
-from learning.gpt2.ioi_circuit_analyzer import IoiCircuitAnalyzer
-from learning.gpt2.model import GPT2, PretrainedName
-from learning.gpt2.prompts import PromptTemplate
+from learning.ioi_circuit.data_sources import NamesDataSource
+from learning.ioi_circuit.ioi_circuit_analyzer import IoiCircuitAnalyzer
+from learning.ioi_circuit.model import GPT2, PretrainedName
+from learning.ioi_circuit.prompts import PromptTemplate
 
 
 @pytest.fixture

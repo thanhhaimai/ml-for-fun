@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import tiktoken
 
-from learning.gpt2.data_sources import NamesDataSource
+from learning.ioi_circuit.data_sources import NamesDataSource
 
 
 @pytest.fixture

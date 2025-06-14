@@ -226,7 +226,22 @@ class DiffLogitsMetrics:
 
 @dataclass
 class ProbsMetrics:
-    # Logits Metrics
+    """
+    Metrics comparing model output probabilities before and after an intervention (e.g., head patching).
+
+    This class captures changes in probabilities and logits for specific tokens of interest (s1, s2, s3),
+    as well as overall distributional changes between the original and patched outputs.
+
+    A key insight is that the logit difference is approximately the log of the probability ratio:
+
+        logit_diff ≈ log(patched_prob / original_prob)
+
+    - `logit_diff > 0`: This suggests the patched component boost this token.
+    - `logit_diff < 0`: This suggests the patched component suppress this token.
+    - `logit_diff ≈ 0`: The intervention had a negligible effect on the token's probability.
+    """
+
+    # --- Token-specific probability metrics ---
     s1_prob_original: float
     s2_prob_original: float
     s3_prob_original: float
@@ -237,12 +252,12 @@ class ProbsMetrics:
     s2_prob_factor: float
     s3_prob_factor: float
 
-    # Logits Metrics
+    # --- Token-specific logit metrics ---
     s1_logit_diff: float
     s2_logit_diff: float
     s3_logit_diff: float
 
-    # Probs Metrics
+    # --- Full distribution metrics ---
     kl_divergence: float
     js_divergence: float
     total_variation: float
