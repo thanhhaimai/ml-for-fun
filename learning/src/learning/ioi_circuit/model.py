@@ -1,7 +1,7 @@
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Self
+from typing import NamedTuple, Self
 
 import torch
 import torch.nn.functional as F
@@ -70,8 +70,7 @@ PRETRAINED_CONFIG = {
 }
 
 
-@dataclass
-class HeadId:
+class HeadId(NamedTuple):
     block_idx: int
     head_idx: int
 
@@ -115,11 +114,22 @@ class AttentionHead(nn.Module):
             ),
         )
 
+        self.should_capture_input = False
         self.should_capture_output = False
+        self.use_frozen_input = False
         self.use_frozen_output = False
+
+        self.register_buffer("frozen_input", None)
         self.register_buffer("frozen_output", None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.should_capture_input and self.use_frozen_input:
+            self.frozen_input, x = x, self.frozen_input
+        elif self.use_frozen_input:
+            x = self.frozen_input
+        elif self.should_capture_input:
+            self.frozen_input = x
+
         if self.should_capture_output and self.use_frozen_output:
             previous_frozen_output = self.frozen_output
             self.frozen_output = self._forward_impl(x)
@@ -224,24 +234,7 @@ class MultiHeadFlashAttention(nn.Module):
         )
         self.dropout = nn.Dropout(config.dropout)
 
-        self.should_capture_output = False
-        self.use_frozen_output = False
-        self.register_buffer("frozen_output", None)
-
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        if self.should_capture_output and self.use_frozen_output:
-            previous_frozen_output = self.frozen_output
-            self.frozen_output = self._forward_impl(x)
-            return previous_frozen_output
-        elif self.use_frozen_output:
-            return self.frozen_output
-        elif self.should_capture_output:
-            self.frozen_output = self._forward_impl(x)
-            return self.frozen_output
-        else:
-            return self._forward_impl(x)
-
-    def _forward_impl(self, x: torch.Tensor) -> torch.Tensor:
         """
         x: [B, S, E]
         return: [B, S, E]
@@ -412,9 +405,36 @@ class GPT2(nn.Module):
     def forward(self, indices: torch.Tensor) -> torch.Tensor:
         """
         indices: [B, S]
+        return: [B, S, V]
         """
         E = self.embedding_size
         V = self.vocab_size
+
+        B, S = indices.shape
+        assert_shape("indices", indices, (B, S))
+
+        embedding = self.get_embedding(indices)
+        assert_shape("embedding", embedding, (B, S, E))
+
+        # shape: [B, S, E]
+        for block in self.blocks_module:
+            embedding = block(embedding)
+            assert_shape("embedding", embedding, (B, S, E))
+
+        embedding = self.layer_norm(embedding)
+        assert_shape("embedding", embedding, (B, S, E))
+
+        # shape: [B, S, V]
+        output = self.linear(embedding)
+        assert_shape("output", output, (B, S, V))
+        return output
+
+    def get_embedding(self, indices: torch.Tensor) -> torch.Tensor:
+        """
+        indices: [B, S]
+        return: [B, S, E]
+        """
+        E = self.embedding_size
 
         B, S = indices.shape
         assert_shape("indices", indices, (B, S))
@@ -438,18 +458,7 @@ class GPT2(nn.Module):
         embedding = self.dropout(embedding)
         assert_shape("embedding", embedding, (B, S, E))
 
-        # shape: [B, S, E]
-        for block in self.blocks_module:
-            embedding = block(embedding)
-            assert_shape("embedding", embedding, (B, S, E))
-
-        embedding = self.layer_norm(embedding)
-        assert_shape("embedding", embedding, (B, S, E))
-
-        # shape: [B, S, V]
-        output = self.linear(embedding)
-        assert_shape("output", output, (B, S, V))
-        return output
+        return embedding
 
     def generate(self, indices: torch.Tensor, max_length: int) -> torch.Tensor:
         """
@@ -486,6 +495,35 @@ class GPT2(nn.Module):
 
         return indices
 
+    def get_head(self, head_id: HeadId) -> AttentionHead:
+        return self.blocks[head_id.block_idx].attention.heads[head_id.head_idx]
+
+    # ==== INPUT ====
+
+    def set_capture_input_all(self, should_capture_input: bool):
+        for block in self.blocks:
+            for head in block.attention.heads:
+                head.should_capture_input = should_capture_input
+
+    def set_capture_input_heads(
+        self, head_ids: list[HeadId], should_capture_input: bool
+    ):
+        for head_id in head_ids:
+            self.get_head(head_id).should_capture_input = should_capture_input
+
+    def set_use_frozen_input_all(self, use_frozen_input: bool):
+        for block in self.blocks:
+            for head in block.attention.heads:
+                head.use_frozen_input = use_frozen_input
+
+    def set_use_frozen_input_heads(
+        self, head_ids: list[HeadId], use_frozen_input: bool
+    ):
+        for head_id in head_ids:
+            self.get_head(head_id).use_frozen_input = use_frozen_input
+
+    # ==== OUTPUT ====
+
     def set_capture_output_all(self, should_capture_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
@@ -495,26 +533,20 @@ class GPT2(nn.Module):
         self, head_ids: list[HeadId], should_capture_output: bool
     ):
         for head_id in head_ids:
-            self.blocks[head_id.block_idx].attention.heads[
-                head_id.head_idx
-            ].should_capture_output = should_capture_output
+            self.get_head(head_id).should_capture_output = should_capture_output
 
     def set_use_frozen_output_all(self, use_frozen_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
                 head.use_frozen_output = use_frozen_output
 
-    def set_use_frozen_output_block(self, block_idx: int, use_frozen_output: bool):
-        for head in self.blocks[block_idx].attention.heads:
-            head.use_frozen_output = use_frozen_output
-
     def set_use_frozen_output_heads(
         self, head_ids: list[HeadId], use_frozen_output: bool
     ):
         for head_id in head_ids:
-            self.blocks[head_id.block_idx].attention.heads[
-                head_id.head_idx
-            ].use_frozen_output = use_frozen_output
+            self.get_head(head_id).use_frozen_output = use_frozen_output
+
+    # ================
 
     @classmethod
     def from_pretrained(

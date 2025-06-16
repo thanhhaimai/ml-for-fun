@@ -3,7 +3,7 @@ import tiktoken
 import torch
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
-from learning.ioi_circuit.model import GPT2, PretrainedName
+from learning.ioi_circuit.model import GPT2, HeadId, PretrainedName
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
@@ -132,3 +132,69 @@ def test_same_pretrained_logits(tokenizer: tiktoken.Encoding, device: torch.devi
 
     # Validate that the logits are the same from both models
     assert torch.allclose(logits, pretrained_logits)
+
+
+@torch.no_grad()
+def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
+    model, _pretrained_model = GPT2.from_pretrained(
+        PretrainedName.GPT2_SMALL,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+
+    B = 1
+    S = 1
+    E = model.embedding_size
+
+    text = "Mary"
+    embedding_1 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
+    assert_shape("embedding_1", embedding_1, (B, S, E))
+
+    # Test that capturing output saves the output to frozen_output
+    model.set_capture_output_all(True)
+    output_1 = model.blocks[0].attention.heads[0](embedding_1)
+    assert torch.allclose(model.get_head(HeadId(0, 0)).frozen_output, output_1)
+
+    # Test that using frozen output gives the same output as the captured output, even when the input is different
+    text = "John"
+    embedding_2 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
+    assert_shape("embedding_2", embedding_2, (B, S, E))
+
+    model.set_capture_output_all(False)
+    model.set_use_frozen_output_all(True)
+    output_2 = model.blocks[0].attention.heads[0](embedding_2)
+    assert torch.allclose(output_1, output_2)
+
+
+@torch.no_grad()
+def test_frozen_input(tokenizer: tiktoken.Encoding, device: torch.device):
+    model, _pretrained_model = GPT2.from_pretrained(
+        PretrainedName.GPT2_SMALL,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+
+    B = 1
+    S = 1
+    E = model.embedding_size
+
+    text = "Mary"
+    embedding_1 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
+    assert_shape("embedding_1", embedding_1, (B, S, E))
+
+    # Test that capturing input saves the input to frozen_input
+    model.set_capture_input_all(True)
+    output_1 = model.blocks[0].attention.heads[0](embedding_1)
+    assert torch.allclose(model.get_head(HeadId(0, 0)).frozen_input, embedding_1)
+
+    # Test that using frozen input gives the same output_1, even when the input is different
+    text = "John"
+    embedding_2 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
+    assert_shape("embedding_2", embedding_2, (B, S, E))
+
+    model.set_capture_input_all(False)
+    model.set_use_frozen_input_all(True)
+    output_2 = model.blocks[0].attention.heads[0](embedding_2)
+    assert torch.allclose(output_1, output_2)
