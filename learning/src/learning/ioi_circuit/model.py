@@ -39,6 +39,7 @@ class LearnerConfig:
 
 
 class PretrainedName(StrEnum):
+    TEST = "test"
     GPT2_SMALL = "openai-community/gpt2"
     GPT2_MEDIUM = "openai-community/gpt2-medium"
     GPT2_LARGE = "openai-community/gpt2-large"
@@ -47,6 +48,12 @@ class PretrainedName(StrEnum):
 
 # Pretrained GPT2 configs
 PRETRAINED_CONFIG = {
+    PretrainedName.TEST: ModelConfig(
+        num_blocks=2,
+        num_heads=2,
+        embedding_size=4,
+        sequence_length=4,
+    ),
     PretrainedName.GPT2_SMALL: ModelConfig(
         num_blocks=12,
         num_heads=12,

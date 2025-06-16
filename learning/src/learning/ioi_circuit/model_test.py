@@ -3,7 +3,7 @@ import tiktoken
 import torch
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
-from learning.ioi_circuit.model import GPT2, HeadId, PretrainedName
+from learning.ioi_circuit.model import GPT2, PRETRAINED_CONFIG, HeadId, PretrainedName
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
@@ -135,41 +135,74 @@ def test_same_pretrained_logits(tokenizer: tiktoken.Encoding, device: torch.devi
 
 
 def test_set_mode_single_head():
-    model, _pretrained_model = GPT2.from_pretrained(
-        PretrainedName.GPT2_SMALL,
-        device=torch.device("cpu"),
-    )
-
+    model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
     model.set_mode(
-        capture_input=[HeadId(1, 1)],
-        use_frozen_input=[HeadId(1, 2)],
-        capture_output=[HeadId(1, 3)],
-        use_frozen_output=[HeadId(1, 4)],
+        capture_input=[HeadId(0, 0)],
+        use_frozen_input=[HeadId(0, 1)],
+        capture_output=[HeadId(1, 0)],
+        use_frozen_output=[HeadId(1, 1)],
     )
 
     for layer_idx in range(model.config.num_blocks):
         for head_idx in range(model.config.num_heads):
             head_id = HeadId(layer_idx, head_idx)
-            if head_id == HeadId(1, 1):
+            if head_id == HeadId(0, 0):
                 assert model.get_head(head_id).should_capture_input
             else:
                 assert not model.get_head(head_id).should_capture_input
 
-            if head_id == HeadId(1, 2):
+            if head_id == HeadId(0, 1):
                 assert model.get_head(head_id).use_frozen_input
             else:
                 assert not model.get_head(head_id).use_frozen_input
 
-            if head_id == HeadId(1, 3):
+            if head_id == HeadId(1, 0):
                 assert model.get_head(head_id).should_capture_output
             else:
                 assert not model.get_head(head_id).should_capture_output
 
-            if head_id == HeadId(1, 4):
+            if head_id == HeadId(1, 1):
                 assert model.get_head(head_id).use_frozen_output
             else:
+                assert not model.get_head(head_id).use_frozen_output
+
+
+def test_mode_flip_flop():
+    model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
+    model.eval()
+
+    # Enable all modes
+    model.set_mode(
+        capture_input=True,
+        use_frozen_input=True,
+        capture_output=True,
+        use_frozen_output=True,
+    )
+
+    # Only set modes for head (1, 1)
+    # This should disable all other heads
+    model.set_mode(
+        capture_input=[HeadId(1, 1)],
+        use_frozen_input=[HeadId(1, 1)],
+        capture_output=[HeadId(1, 1)],
+        use_frozen_output=[HeadId(1, 1)],
+    )
+
+    # Verify that all heads are disabled
+    for layer_idx in range(model.config.num_blocks):
+        for head_idx in range(model.config.num_heads):
+            head_id = HeadId(layer_idx, head_idx)
+            if head_id == HeadId(1, 1):
+                assert model.get_head(head_id).should_capture_input
+                assert model.get_head(head_id).use_frozen_input
+                assert model.get_head(head_id).should_capture_output
+                assert model.get_head(head_id).use_frozen_output
+            else:
+                assert not model.get_head(head_id).should_capture_input
+                assert not model.get_head(head_id).use_frozen_input
+                assert not model.get_head(head_id).should_capture_output
                 assert not model.get_head(head_id).use_frozen_output
 
 
@@ -183,11 +216,7 @@ def test_set_mode(
     capture_output: bool | list[HeadId],
     use_frozen_output: bool | list[HeadId],
 ):
-    model, _pretrained_model = GPT2.from_pretrained(
-        PretrainedName.GPT2_SMALL,
-        device=torch.device("cpu"),
-    )
-
+    model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
     model.set_mode(
@@ -197,19 +226,15 @@ def test_set_mode(
         use_frozen_output=use_frozen_output,
     )
 
-    assert model.get_head(HeadId(1, 2)).should_capture_input == capture_input
-    assert model.get_head(HeadId(1, 2)).use_frozen_input == use_frozen_input
-    assert model.get_head(HeadId(1, 2)).should_capture_output == capture_output
-    assert model.get_head(HeadId(1, 2)).use_frozen_output == use_frozen_output
+    assert model.get_head(HeadId(0, 0)).should_capture_input == capture_input
+    assert model.get_head(HeadId(0, 0)).use_frozen_input == use_frozen_input
+    assert model.get_head(HeadId(0, 0)).should_capture_output == capture_output
+    assert model.get_head(HeadId(0, 0)).use_frozen_output == use_frozen_output
 
 
 @torch.no_grad()
 def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
-    model, _pretrained_model = GPT2.from_pretrained(
-        PretrainedName.GPT2_SMALL,
-        device=torch.device("cpu"),
-    )
-
+    model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
     B = 1
@@ -247,11 +272,7 @@ def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
 
 @torch.no_grad()
 def test_frozen_input(tokenizer: tiktoken.Encoding, device: torch.device):
-    model, _pretrained_model = GPT2.from_pretrained(
-        PretrainedName.GPT2_SMALL,
-        device=torch.device("cpu"),
-    )
-
+    model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
     B = 1
