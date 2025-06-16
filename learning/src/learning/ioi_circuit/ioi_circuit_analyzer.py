@@ -100,8 +100,12 @@ class IoiCircuitAnalyzer:
 
     def capture_baseline_output(self, prompts_abc: list[str]) -> CapturedOutput:
         B = len(prompts_abc)
-        self.model.set_capture_output_all(True)
-        self.model.set_use_frozen_output_all(False)
+        self.model.set_mode(
+            capture_input=False,
+            use_frozen_input=False,
+            capture_output=True,
+            use_frozen_output=False,
+        )
 
         logits_abc = self.forward(prompts_abc)
         assert_shape("logits_abc", logits_abc, (B, self.V))
@@ -144,8 +148,12 @@ class IoiCircuitAnalyzer:
         # ================================
         # Phase B: capture the ABB output (prepatched)
         # ================================
-        self.model.set_capture_output_all(True)
-        self.model.set_use_frozen_output_all(False)
+        self.model.set_mode(
+            capture_input=False,
+            use_frozen_input=False,
+            capture_output=True,
+            use_frozen_output=False,
+        )
         logits_prepatched = self.forward(prompts_abb)
         assert_shape("logits_prepatched", logits_prepatched, (B, self.V))
 
@@ -160,11 +168,13 @@ class IoiCircuitAnalyzer:
         ].frozen_output = baseline
 
         # Run the model using the frozen outputs
-        # But also capture all end_heads outputs
-        # NOTE: the captured end_heads outputs are not used within this phase (they are used in Phase D)
-        self.model.set_capture_output_all(False)
-        self.model.set_capture_output_heads(config.end_heads, True)
-        self.model.set_use_frozen_output_all(True)
+        # But also capture all end_heads inputs
+        self.model.set_mode(
+            capture_input=config.end_heads,
+            use_frozen_input=False,
+            capture_output=False,
+            use_frozen_output=True,
+        )
         logits_patched = self.forward(prompts_abb)
         assert_shape("logits_patched", logits_patched, (B, self.V))
 
@@ -172,7 +182,12 @@ class IoiCircuitAnalyzer:
         # Phase D: Forward with the end_heads frozen output
         # ================================
         if config.end_heads:
-            self.model.set_capture_output_all(False)
+            self.model.set_mode(
+                capture_input=False,
+                use_frozen_input=False,
+                capture_output=False,
+                use_frozen_output=True,
+            )
 
             # any block after this layer will not use the frozen output except for the end_heads
             min_block_idx = min(head.block_idx for head in config.end_heads)

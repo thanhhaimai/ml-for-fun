@@ -134,6 +134,75 @@ def test_same_pretrained_logits(tokenizer: tiktoken.Encoding, device: torch.devi
     assert torch.allclose(logits, pretrained_logits)
 
 
+def test_set_mode_single_head():
+    model, _pretrained_model = GPT2.from_pretrained(
+        PretrainedName.GPT2_SMALL,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+
+    model.set_mode(
+        capture_input=[HeadId(1, 1)],
+        use_frozen_input=[HeadId(1, 2)],
+        capture_output=[HeadId(1, 3)],
+        use_frozen_output=[HeadId(1, 4)],
+    )
+
+    for layer_idx in range(model.config.num_blocks):
+        for head_idx in range(model.config.num_heads):
+            head_id = HeadId(layer_idx, head_idx)
+            if head_id == HeadId(1, 1):
+                assert model.get_head(head_id).should_capture_input
+            else:
+                assert not model.get_head(head_id).should_capture_input
+
+            if head_id == HeadId(1, 2):
+                assert model.get_head(head_id).use_frozen_input
+            else:
+                assert not model.get_head(head_id).use_frozen_input
+
+            if head_id == HeadId(1, 3):
+                assert model.get_head(head_id).should_capture_output
+            else:
+                assert not model.get_head(head_id).should_capture_output
+
+            if head_id == HeadId(1, 4):
+                assert model.get_head(head_id).use_frozen_output
+            else:
+                assert not model.get_head(head_id).use_frozen_output
+
+
+@pytest.mark.parametrize("capture_input", [True, False])
+@pytest.mark.parametrize("use_frozen_input", [True, False])
+@pytest.mark.parametrize("capture_output", [True, False])
+@pytest.mark.parametrize("use_frozen_output", [True, False])
+def test_set_mode(
+    capture_input: bool | list[HeadId],
+    use_frozen_input: bool | list[HeadId],
+    capture_output: bool | list[HeadId],
+    use_frozen_output: bool | list[HeadId],
+):
+    model, _pretrained_model = GPT2.from_pretrained(
+        PretrainedName.GPT2_SMALL,
+        device=torch.device("cpu"),
+    )
+
+    model.eval()
+
+    model.set_mode(
+        capture_input=capture_input,
+        use_frozen_input=use_frozen_input,
+        capture_output=capture_output,
+        use_frozen_output=use_frozen_output,
+    )
+
+    assert model.get_head(HeadId(1, 2)).should_capture_input == capture_input
+    assert model.get_head(HeadId(1, 2)).use_frozen_input == use_frozen_input
+    assert model.get_head(HeadId(1, 2)).should_capture_output == capture_output
+    assert model.get_head(HeadId(1, 2)).use_frozen_output == use_frozen_output
+
+
 @torch.no_grad()
 def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
     model, _pretrained_model = GPT2.from_pretrained(
@@ -152,7 +221,12 @@ def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
     assert_shape("embedding_1", embedding_1, (B, S, E))
 
     # Test that capturing output saves the output to frozen_output
-    model.set_capture_output_all(True)
+    model.set_mode(
+        capture_input=False,
+        use_frozen_input=False,
+        capture_output=True,
+        use_frozen_output=False,
+    )
     output_1 = model.blocks[0].attention.heads[0](embedding_1)
     assert torch.allclose(model.get_head(HeadId(0, 0)).frozen_output, output_1)
 
@@ -161,8 +235,12 @@ def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
     embedding_2 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
     assert_shape("embedding_2", embedding_2, (B, S, E))
 
-    model.set_capture_output_all(False)
-    model.set_use_frozen_output_all(True)
+    model.set_mode(
+        capture_input=False,
+        use_frozen_input=False,
+        capture_output=False,
+        use_frozen_output=True,
+    )
     output_2 = model.blocks[0].attention.heads[0](embedding_2)
     assert torch.allclose(output_1, output_2)
 
@@ -185,7 +263,12 @@ def test_frozen_input(tokenizer: tiktoken.Encoding, device: torch.device):
     assert_shape("embedding_1", embedding_1, (B, S, E))
 
     # Test that capturing input saves the input to frozen_input
-    model.set_capture_input_all(True)
+    model.set_mode(
+        capture_input=True,
+        use_frozen_input=False,
+        capture_output=False,
+        use_frozen_output=False,
+    )
     output_1 = model.blocks[0].attention.heads[0](embedding_1)
     assert torch.allclose(model.get_head(HeadId(0, 0)).frozen_input, embedding_1)
 
@@ -194,7 +277,11 @@ def test_frozen_input(tokenizer: tiktoken.Encoding, device: torch.device):
     embedding_2 = model.get_embedding(torch.tensor([tokenizer.encode(text)]))
     assert_shape("embedding_2", embedding_2, (B, S, E))
 
-    model.set_capture_input_all(False)
-    model.set_use_frozen_input_all(True)
+    model.set_mode(
+        capture_input=False,
+        use_frozen_input=True,
+        capture_output=False,
+        use_frozen_output=False,
+    )
     output_2 = model.blocks[0].attention.heads[0](embedding_2)
     assert torch.allclose(output_1, output_2)

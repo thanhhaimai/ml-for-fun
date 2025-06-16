@@ -498,55 +498,77 @@ class GPT2(nn.Module):
     def get_head(self, head_id: HeadId) -> AttentionHead:
         return self.blocks[head_id.block_idx].attention.heads[head_id.head_idx]
 
-    # ==== INPUT ====
+    def set_mode(
+        self,
+        *,
+        capture_input: bool | list[HeadId],
+        use_frozen_input: bool | list[HeadId],
+        capture_output: bool | list[HeadId],
+        use_frozen_output: bool | list[HeadId],
+    ):
+        match capture_input:
+            case bool():
+                capture_input_bool = capture_input
+                capture_input_list = []
+            case list():
+                capture_input_bool = False
+                capture_input_list = capture_input
+            case _:
+                raise ValueError(f"Invalid capture_input: {capture_input}")
 
-    def set_capture_input_all(self, should_capture_input: bool):
         for block in self.blocks:
             for head in block.attention.heads:
-                head.should_capture_input = should_capture_input
+                head.should_capture_input = capture_input_bool
+        for head_id in capture_input_list:
+            self.get_head(head_id).should_capture_input = True
 
-    def set_capture_input_heads(
-        self, head_ids: list[HeadId], should_capture_input: bool
-    ):
-        for head_id in head_ids:
-            self.get_head(head_id).should_capture_input = should_capture_input
+        match use_frozen_input:
+            case bool():
+                use_frozen_input_bool = use_frozen_input
+                use_frozen_input_list = []
+            case list():
+                use_frozen_input_bool = False
+                use_frozen_input_list = use_frozen_input
+            case _:
+                raise ValueError(f"Invalid use_frozen_input: {use_frozen_input}")
 
-    def set_use_frozen_input_all(self, use_frozen_input: bool):
         for block in self.blocks:
             for head in block.attention.heads:
-                head.use_frozen_input = use_frozen_input
+                head.use_frozen_input = use_frozen_input_bool
+        for head_id in use_frozen_input_list:
+            self.get_head(head_id).use_frozen_input = True
 
-    def set_use_frozen_input_heads(
-        self, head_ids: list[HeadId], use_frozen_input: bool
-    ):
-        for head_id in head_ids:
-            self.get_head(head_id).use_frozen_input = use_frozen_input
+        match capture_output:
+            case bool():
+                capture_output_bool = capture_output
+                capture_output_list = []
+            case list():
+                capture_output_bool = False
+                capture_output_list = capture_output
+            case _:
+                raise ValueError(f"Invalid capture_output: {capture_output}")
 
-    # ==== OUTPUT ====
-
-    def set_capture_output_all(self, should_capture_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
-                head.should_capture_output = should_capture_output
+                head.should_capture_output = capture_output_bool
+        for head_id in capture_output_list:
+            self.get_head(head_id).should_capture_output = True
 
-    def set_capture_output_heads(
-        self, head_ids: list[HeadId], should_capture_output: bool
-    ):
-        for head_id in head_ids:
-            self.get_head(head_id).should_capture_output = should_capture_output
+        match use_frozen_output:
+            case bool():
+                use_frozen_output_bool = use_frozen_output
+                use_frozen_output_list = []
+            case list():
+                use_frozen_output_bool = False
+                use_frozen_output_list = use_frozen_output
+            case _:
+                raise ValueError(f"Invalid use_frozen_output: {use_frozen_output}")
 
-    def set_use_frozen_output_all(self, use_frozen_output: bool):
         for block in self.blocks:
             for head in block.attention.heads:
-                head.use_frozen_output = use_frozen_output
-
-    def set_use_frozen_output_heads(
-        self, head_ids: list[HeadId], use_frozen_output: bool
-    ):
-        for head_id in head_ids:
-            self.get_head(head_id).use_frozen_output = use_frozen_output
-
-    # ================
+                head.use_frozen_output = use_frozen_output_bool
+        for head_id in use_frozen_output_list:
+            self.get_head(head_id).use_frozen_output = True
 
     @classmethod
     def from_pretrained(

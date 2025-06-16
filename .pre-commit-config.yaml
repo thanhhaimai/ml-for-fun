@@ -26,7 +26,7 @@ repos:
       - id: pytest-only-changed
         name: pytest-only-changed
         description: "Run only the necessary tests before commit"
-        entry: uv run pytest --testmon
+        entry: uv run pytest --testmon -n auto
         types_or: [python, pyi]
         language: system
         pass_filenames: false
@@ -37,7 +37,7 @@ repos:
       - id: pytest-all
         name: pytest-all
         description: "Run all tests before push"
-        entry: uv run pytest
+        entry: uv run pytest -n auto
         types_or: [python, pyi]
         language: system
         pass_filenames: false
