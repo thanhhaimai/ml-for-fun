@@ -162,13 +162,14 @@ class IoiCircuitAnalyzer:
         # ================================
         # Effectively, we're knocking out the start_head output
         # If the head is not important, the patched output should be close to the ABB output
-        # NOTE: the patched end_heads output is not used within this phase (it is used in Phase D)
-        self.model.blocks[config.start_head.block_idx].attention.heads[
-            config.start_head.head_idx
-        ].frozen_output = baseline
+        prepatched_start_head_output = self.model.get_head(
+            config.start_head
+        ).frozen_output
+        self.model.get_head(config.start_head).frozen_output = baseline
 
         # Run the model using the frozen outputs
         # But also capture all end_heads inputs
+        # NOTE: the patched end_heads input is not used within this phase (it is used in Phase D)
         self.model.set_mode(
             capture_input=config.end_heads,
             use_frozen_input=False,
@@ -182,27 +183,30 @@ class IoiCircuitAnalyzer:
         # Phase D: Forward with the end_heads frozen output
         # ================================
         if config.end_heads:
-            self.model.set_mode(
-                capture_input=False,
-                use_frozen_input=False,
-                capture_output=False,
-                use_frozen_output=True,
-            )
+            # Reset the start_head output to the prepatched output
+            self.model.get_head(
+                config.start_head
+            ).frozen_output = prepatched_start_head_output
 
             # any block after this layer will not use the frozen output except for the end_heads
             min_block_idx = min(head.block_idx for head in config.end_heads)
 
-            # - First, mark all heads to use frozen output
-            self.model.set_use_frozen_output_all(True)
+            # All heads up to min_block_idx (exclusive) will use the frozen output
+            # All heads starting from min_block_idx (inclusive) will not use the frozen output
+            unchanged_heads = [
+                HeadId(block_idx, head_idx)
+                for block_idx in range(min_block_idx)
+                for head_idx in range(self.model.config.num_heads)
+            ]
+            print(f"{config.end_heads=}")
+            print(f"{unchanged_heads=}")
 
-            # - Second, mark all blocks after the min_block_idx to not use frozen output
-            #   This means the network is split into two parts: the first part uses the frozen output, the second part does not
-            for block_idx in range(min_block_idx + 1, self.model.config.num_blocks):
-                self.model.set_use_frozen_output_block(block_idx, False)
-
-            # - Third, mark the end_heads to use the frozen output
-            #   The end_heads are the only heads in the second part that use the frozen output
-            self.model.set_use_frozen_output_heads(config.end_heads, True)
+            self.model.set_mode(
+                capture_input=False,
+                use_frozen_input=config.end_heads,
+                capture_output=True,
+                use_frozen_output=unchanged_heads,
+            )
 
             logits_patched = self.forward(prompts_abb)
             assert_shape("patched_probs", logits_patched, (B, self.V))

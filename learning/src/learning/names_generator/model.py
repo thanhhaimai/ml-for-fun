@@ -97,9 +97,13 @@ class Batch:
 
 class SequentialBatchLearner(Learner[Batch]):
     def __init__(
-        self, model: nn.Module, optimizer: optim.Optimizer, criterion: nn.Module
+        self,
+        model: nn.Module,
+        optimizer: optim.Optimizer,
+        criterion: nn.Module,
+        device: torch.device,
     ):
-        super().__init__(model, optimizer, criterion)
+        super().__init__(model, optimizer, criterion, device=device)
 
     def batch_step(self, batch: Batch) -> BatchResult:
         # Declare that the model is a NamesGenerator

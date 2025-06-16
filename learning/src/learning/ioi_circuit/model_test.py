@@ -3,7 +3,12 @@ import tiktoken
 import torch
 from transformers.modeling_outputs import CausalLMOutputWithCrossAttentions
 
-from learning.ioi_circuit.model import GPT2, PRETRAINED_CONFIG, HeadId, PretrainedName
+from learning.ioi_circuit.model import (
+    GPT2,
+    PRETRAINED_CONFIG,
+    HeadId,
+    PretrainedName,
+)
 
 
 def assert_shape(name: str, tensor: torch.Tensor, shape: tuple[int, ...]):
@@ -16,13 +21,8 @@ def tokenizer() -> tiktoken.Encoding:
     return tiktoken.get_encoding("gpt2")
 
 
-@pytest.fixture
-def device() -> torch.device:
-    return torch.device("cpu")
-
-
 @torch.no_grad()
-def test_all_layers_output(tokenizer: tiktoken.Encoding, device: torch.device):
+def test_all_layers_output(tokenizer: tiktoken.Encoding):
     model, pretrained_model = GPT2.from_pretrained(
         PretrainedName.GPT2_SMALL,
         device=torch.device("cpu"),
@@ -95,7 +95,7 @@ def test_all_layers_output(tokenizer: tiktoken.Encoding, device: torch.device):
 
 
 @torch.no_grad()
-def test_same_pretrained_logits(tokenizer: tiktoken.Encoding, device: torch.device):
+def test_same_pretrained_logits(tokenizer: tiktoken.Encoding):
     model, pretrained_model = GPT2.from_pretrained(
         PretrainedName.GPT2_SMALL,
         device=torch.device("cpu"),
@@ -233,7 +233,7 @@ def test_set_mode(
 
 
 @torch.no_grad()
-def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
+def test_frozen_output(tokenizer: tiktoken.Encoding):
     model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
@@ -271,7 +271,7 @@ def test_frozen_output(tokenizer: tiktoken.Encoding, device: torch.device):
 
 
 @torch.no_grad()
-def test_frozen_input(tokenizer: tiktoken.Encoding, device: torch.device):
+def test_frozen_input(tokenizer: tiktoken.Encoding):
     model = GPT2(PRETRAINED_CONFIG[PretrainedName.TEST])
     model.eval()
 
