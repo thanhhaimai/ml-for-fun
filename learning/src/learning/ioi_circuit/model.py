@@ -130,12 +130,6 @@ class AttentionHead(nn.Module):
         self.register_buffer("frozen_output", None)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        print(f"{self.should_capture_input=}")
-        print(f"{self.use_frozen_input=}")
-        print(f"{self.should_capture_output=}")
-        print(f"{self.use_frozen_output=}")
-        print(f"{self.frozen_input=}")
-        print(f"{x=}")
         if self.should_capture_input and self.use_frozen_input:
             self.frozen_input, x = x, self.frozen_input
         elif self.use_frozen_input:
