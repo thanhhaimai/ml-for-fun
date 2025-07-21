@@ -2,7 +2,6 @@
 members = [
     "data",
     "learning",
-    "notebooks",
 ]
 
 [dependency-groups]
